@@ -3,5 +3,7 @@
 build.log
 .dsh-home/
 
-# 注意：deepseek-harness/ 是嵌套 git 仓库（上游 fork 基线），
-# 其纳入方式（submodule / subtree / 独立仓库）待定，暂不在本文件中忽略。
+# deepseek-harness/ 是嵌套 git 仓库（dsh 的 fork 基线），它自己的远端就是
+# HMUG12/Cluster-Cooperation.git 的 main 分支，因此不并入本仓库：
+# 两边历史完全无关，混在一起会让任何一次 fetch 变成拉取 210 MiB 的 dsh 全量历史。
+deepseek-harness/
