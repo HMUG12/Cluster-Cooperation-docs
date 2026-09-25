@@ -1,0 +1,7 @@
+# 本地开发产物与运行时状态，不入库
+.dev/
+build.log
+.dsh-home/
+
+# 注意：deepseek-harness/ 是嵌套 git 仓库（上游 fork 基线），
+# 其纳入方式（submodule / subtree / 独立仓库）待定，暂不在本文件中忽略。

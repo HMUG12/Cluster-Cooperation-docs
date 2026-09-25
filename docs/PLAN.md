@@ -1,0 +1,695 @@
+# Cluster-Cooperation 方案（v2 · 源码核实版）
+
+> 在 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（**dsh**）之上做二次开发，
+> 参照 [wangzuke/open-Agent-Team](https://github.com/wangzuke/open-Agent-Team)（**OAT**）的协作范式，
+> 做一个**靠配置驱动模型、角色、拓扑与编排策略的 Agent 集群运行时**。
+
+**基线已落地（本机）**
+
+| 项 | 值 |
+|---|---|
+| 上游基线 | `dsh-0.1.6-alpha.2`（2026-09-17 的发布合并提交） |
+| 本地路径 | `deepseek-harness/`（工作区子树） |
+| 工具链 | Node **v24.21.0**（`C:\Program Files\nodejs`，未进 PATH）/ npm 11.19.0 / **pnpm 11.7.0**（`%APPDATA%\npm`）/ git 2.45.1 |
+| 安装 | `pnpm install` ✅ 12m52s |
+| 构建 | `pnpm run build` ✅ EXIT=0（含 tsdown Host+Client、Typert、Web 前端 248 个产物） |
+| `--dump-config` | ✅ 五个 profile 均可导出插件树 |
+
+> **每个新 shell 需先执行**：`$env:PATH="C:\Program Files\nodejs;$env:APPDATA\npm;$env:PATH"`
+> （或一次性 `setx` 写入用户 PATH，待你确认。）
+
+---
+
+## 1. 结论先行：这活比想象中小，但价值集中
+
+调研前我以为要从零搭多 Agent 内核；核实后结论相反——**dsh 上游已经把 OAT 的骨架几乎全做完了**，
+而且做得比 OAT 更彻底（状态是落在 Session 事件日志里可重放的，不是落 JSON 文件）。
+但有一件事它明确**没有做**，而这恰好是你的核心诉求：
+
+> **每个 Agent 用哪个模型，dsh 没有"按角色配置"的说法；多 Agent 编排策略也没有一层声明式配置。**
+
+所以本项目的真实定位是：
+
+| 不做 | 要做 |
+|---|---|
+| roster / mailbox / 任务 DAG / 9 个工具 / Web UI（**上游已有**） | **配置层**：一份 `cluster.yml` 声明模型、角色、拓扑、预算 |
+| 自己写 OpenAI/Anthropic adapter（**`dsh-llm-pi-ai` 已有**） | **模型路由层**：按角色/阶段/预算把请求改道到指定模型，含降级链 |
+| 重写 agent loop | **编排层**：briefing、依赖自动解锁、轮次调度、评审回路、压缩与预算 |
+| 从零写聊天 UI（**`client-ui-agent-team` 已有**） | **对话层**：广播 / 圆桌 / 辩论 / 投票等群对话协议 |
+
+---
+
+## 2. 能力盘点：上游已提供 vs 我们要建
+
+### 2.1 上游已提供（直接拿来用，不改）
+
+| 能力 | 实现位置 | 说明 |
+|---|---|---|
+| Team 域服务 | `packages/experimental/agent-team` → `ctx.agentTeams` | `membership / listMembers / spawnTeammate / sendMessage / createTask / getTask / listTasks / updateTask / waitForChange / interrupt / tryMembership` + 3 个 Remote 方法 |
+| 持久化三件套 | 同上 | `TeamMemberSnapshot`（roster）、`TeamMessageSnapshot`+`TeamMessageSource`（去重邮箱）、`TeamTaskSnapshot`（`revision` CAS + `blockedBy` DAG + `writeScopes`） |
+| 重放 | `foldTeam()` | 从根 Session 日志重放出 roster / 看板 / 未投递邮箱 |
+| 模型可用工具（9 个） | `packages/experimental/tool-agent-team` | `spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_create/list/get/update` |
+| Profile 层 | `packages/experimental/agent-team-profile` | patch：禁用 4 个 legacy subagent 工具行，插入 team service + tool 行 |
+| Web UI 层 | `packages/experimental/client-ui-agent-team` | 浏览器端 roster / 任务板（可被 Cluster 面板复用扩展） |
+| **多供应商模型** | `packages/llm/llm-pi-ai` | `openai-completions` / `openai-responses` / `anthropic-messages` 三种协议，cordis.yml 里声明 route + `apiKeyEnv` 即可，**不用自己写 adapter** |
+| **单 Agent 绑定模型** | `packages/core/agent/src/model-selection.ts` → `installModelSelection(agentCtx, ref)` | 官方实现，ACP 已在生产用。注册 `system-prompt/assemble` + `agent/request` + `agent/pre-step` 三个 scoped 监听，返回单一 disposer |
+| 凭据 | `ctx.credentials` | `resolve(ref)` 每次请求重新解析；**配置只放环境变量名，禁放字面量** |
+
+### 2.2 上游明确没有 / 做不到（我们的落点）
+
+| 缺口 | 证据 | 我们的做法 |
+|---|---|---|
+| **per-teammate 模型绑定** | `SpawnTeammateRequest`（`agent-team/src/types.ts:144`）只有 `name/description/prompt/context/provider/signal`，**没有 `agentOptions`**；子 Agent 默认继承父 route | 见 §4.2：监听 `agent/created` + `installModelSelection` |
+| **声明式团队配置** | 全靠 cordis.yml 手写 patch 行 | `cluster/config` + `cluster.yml` |
+| **结构化 briefing** | `spawn_teammate` 只有 name/description/prompt | `cluster/orchestrator` 生成 mission / deliverables / definition_of_done / quality_bar |
+| **依赖自动解锁** | 有 `blockedBy` DAG，但**没有**"解锁后通知 owner" | orchestrator 监听 CAS 提交 → 重算 ready → 自动 `sendMessage` |
+| **群对话协议** | 只有 1:1 `send_message` | `cluster/dialogue` 做广播/圆桌/辩论/投票 |
+| **预算与成本账** | 无集群级预算 | `cluster/telemetry` + 预算硬闸 |
+| **自动组队** | 官方明令："普通任务不触发 delegation，除非用户显式要求" | 我们的 profile 默认就跑 team，绕过这条限制 |
+
+### 2.3 必须接受的硬约束（写进设计）
+
+- `maxMembers: 8`、`maxTasks: 256`、`maxPendingMessagesPerMember: 64`、`maxMessageBytes: 65536`、`disposalTimeoutMs: 5000`（可在 patch 里调）。
+- **共享工作目录**：所有 teammate 看同一个 checkout，**无 worktree 隔离、无文件锁**；`writeScopes` 是 advisory，挡不住 Bash。
+- 实验包**无稳定性承诺**，schema 可能随时变 → 我们只依赖其公开服务与类型，不 fork 源码。
+- **禁止在 `llm/stream` 改道**：`packages/llm/llm/src/index.ts:1036` 有硬守卫，改 provider/model 会抛 `INVALID_PREPARED_CALL`。唯一合法改道层是 **`agent/request` 瀑布**。
+
+---
+
+## 3. 总体架构
+
+```
+                        cluster.yml  (+ cordis.patch.yml 分层覆盖)
+                                    │
+                     ┌──────────────▼───────────────┐
+                     │   cluster/config  (Service)  │  schemastery 校验 · 分层覆盖 · 热重载
+                     │        ctx.clusterConfig     │
+                     └──────────────┬───────────────┘
+        ┌───────────────┬───────────┼───────────────┬─────────────────┐
+        ▼               ▼           ▼               ▼                 ▼
+ cluster/router   cluster/orchestrator  cluster/dialogue  cluster/tools  cluster/telemetry
+        │               │                  │               │                 │
+ agent/created    updateTask CAS     sendMessage 封装   agent.ctx scoped  SessionEventMap
+ +installModel-   → 自动解锁        广播/圆桌/辩论    工具注册          cluster/* 事件
+  Selection       轮次/重试/评审                                        成本记账
+        │               │                  │                             │
+        ▼               ▼                  ▼                             ▼
+   ctx.llm          ctx.agentTeams    ctx.agentTeams              session log（唯一真相源）
+ (llm-pi-ai 多供应商)  (roster/board/mail)
+                                    │
+                          Lead ──spawn──▶ Teammate Sessions
+
+ cluster/bundle ──▶ profile "cluster"：dsh --profile cluster "任务描述"
+```
+
+---
+
+## 4. 关键技术实现（已核实可行）
+
+### 4.1 模型资产：一张 cordis 片段搞定多供应商
+
+不写 adapter，直接用上游 `dsh-llm-pi-ai` 声明 route：
+
+```yaml
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      coder-gateway:
+        displayName: OpenAI 兼容中转
+        apiKeyEnv: CODER_API_KEY          # 只放环境变量名
+        api: openai-completions
+        baseURL: https://gateway.example/v1
+        models: [{ id: qwen3-coder, contextWindow: 131072, maxTokens: 8192 }]
+      critic-anthropic:
+        displayName: Anthropic 兼容
+        apiKeyEnv: CRITIC_API_KEY
+        api: anthropic-messages
+        baseURL: https://gw.example/anthropic
+        models: [{ id: claude-opus-4, contextWindow: 200000, maxTokens: 16384 }]
+```
+DeepSeek 官方走既有 `llm-deepseek`（provider `deepseek-official`）。
+
+### 4.2 per-teammate 模型绑定：不 fork 实验包的实现路径 ⭐
+
+`spawnTeammate` 不透传 `agentOptions`，但有另一条干净的路：
+
+```ts
+// cluster/router 核心逻辑（伪码）
+ctx.inject(['agentTeams', 'clusterConfig'], ...)
+ctx.on('agent/created', ({ agent }) => {            // ① 串行且早于首次 prompt 装配（已核实）
+  const m = ctx.agentTeams.tryMembership(agent)     // ② 拿到该 member 的 name / role
+  if (!m) return                                    //    非 Team 成员不管
+  const route = ctx.clusterConfig.routeFor(m.name)  // ③ 查 yml：provider + model (+ fallback 链)
+  const dispose = installModelSelection(agent.ctx, { current: route, assembled: undefined })
+  // ④ 用 agent.ctx 承载，随 scope 自动 dispose，HMR/teardown 安全
+  agent.ctx.effect(() => dispose)
+})
+```
+
+**为什么这条路成立（源码证据）**
+
+- `agent/created` 是 **serial 且被 await 的**：`packages/core/agent-loop/tests/scope-lifecycle.spec.ts:100-107` 证明监听器执行完之前，排队的首轮工作不会开始（断言 `order` 为空）；`agent-loop` 文档也写明 "awaits serial `agent/created` initialization before starting queued work"。
+- `installModelSelection` 的三个监听挂在 **`agent.ctx`**（scoped），在 `system-prompt/assemble` 里快照 `{provider,model}`、在 `agent/request` 里替换返回的 `LlmCallConfig`。它在 `llm.prepareCall` **之前**，绕开 `INVALID_PREPARED_CALL` 守卫。
+- 换成 Flavors：`CreateAgentOptions.setup` 是"无竞态槽位"——但 teammate 由 `agent-team` 内部创建，我们拿不到 `setup`，故退而用 `agent/created`，风险已被上述测试覆盖。
+
+**若后续 ProveELS 发现竞态**，兜底方案（代价递增）：
+① 在 `cluster/router` 里于 `agent/pre-step` 首发也插一次 route；
+② fork `packages/experimental/agent-team`，给 `SpawnTeammateRequest` 加 `agentOptions` 字段（约 20 行，须同步更新类型文档与 snapshot）。
+
+### 4.3 配置模型 `cluster.yml`
+
+不变的一期三件套（资产 / 角色 / 策略），但**增加**已核实的字段：
+
+```yaml
+version: 1
+clusters:
+  default:
+    lead:  { model: planner, fallback: [cheap], max_rounds: 12 }
+    topology: mesh            # star | mesh | pipeline | debate
+    limits:                   # 对齐上游硬约束
+      maxMembers: 8
+      maxTasks: 256
+    members:
+      - name: coder-backend
+        route: { provider: coder-gateway, model: qwen3-coder, temperature: 0.0 }
+        fallback: [{ provider: deepseek-official, model: deepseek-chat }]
+        context: fresh        # fresh | fork
+        write_scopes: ["src/server/"]
+        token_budget: 400000
+    orchestration:
+      briefing: structured
+      dependency_auto_unlock: true
+      review: { enabled: true, reviewer: reviewer, max_retries: 2 }
+      consensus: { protocol: majority, max_rounds: 3 }
+    budget:
+      total_tokens: 2000000
+      total_rounds: 60
+      wall_clock_ms: 1800000
+      on_exceed: stop_and_summarize
+```
+
+`agentOptions` 的合法字段只有 `provider / model / reasoningEffort / maxTokens`（`AgentOptions` 定义），
+**`temperature` 不在其中** → 只能由 adapter 侧 route 定义或我们自己扩展，M1 先只用这四个字段，**采样参数退化为 route 级配置**（记入 Known Limitations）。
+
+---
+
+## 5. 包拆分（最终，`packages/cluster/*`）
+
+| 包 | ctx key | 职责 | 主要落点 |
+|---|---|---|---|
+| `cluster/config` | `ctx.clusterConfig` | `cluster.yml` 解析 + schemastery 校验 + 分层覆盖 + 热重载 | Service |
+| `cluster/router` ⭐ | — | **按角色把请求改道到指定模型**，含降级链 | `agent/created` + `installModelSelection` |
+| `cluster/orchestrator` | `ctx.clusterOrchestrator` | briefing、依赖自动解锁、轮次、重试/评审、压缩/预算 | `updateTask` CAS、`agent/turn-stopping`、`agent.inject()` |
+| `cluster/dialogue` | `ctx.clusterDialogue` | 广播 / 圆桌 / 辩论 / 投票 | `ctx.agentTeams.sendMessage` 之上 |
+| `cluster/tools` | （注册到 `ctx.tools`） | 集群增强工具（带 briefing 的 delegate、ask、review） | `agent.ctx` scoped 注册 |
+| `cluster/telemetry` | `ctx.clusterTelemetry` | token/成本/轮次记账 | 扩展 `SessionEventMap`（`cluster/*`） |
+| `cluster/bundle` | — | profile `cluster` + patch：吃进上游 `agent-team-profile` 再叠我们的层 | `dsh.bundle` |
+| `cluster/web` | — | **扩展** `client-ui-agent-team`：加配置/成本/消息图面板 | Client 插件 |
+
+命名与门禁全部遵循 `AGENTS.md`：`@deepseek-ai/dsh-*`、`private: true`、ESM、`cordis` 进 peer+dev、
+注册进 `tsconfig.host.json` / `tsconfig.client.json`、README 必含 Model Experience + Known Limitations。
+
+---
+
+## 6. OAT 机制 → dsh 落地对照（最终版）
+
+| OAT 机制 | 上游是否已有 | 我们要做什么 |
+|---|---|---|
+| 上下文隔离 worker | ✅ `spawnTeammate`，`fresh`/`fork` | 无 |
+| 文件任务板 → 持久化看板 | ✅ 更强（Session 日志 + CAS + DAG 无环校验） | 无 |
+| 文件邮箱 | ✅ Steer 投递（步边界/起新轮/冷恢复）+ 去重键 + no-retry 规则 | 无 |
+| Inbox 自动投递 | ✅ 内建 | 无 |
+| Worker 预等待 `wait_agent` | ✅ 返回 `noProgress` 提示先唤醒 | orchestrator 据此编排唤醒顺序 |
+| 上下文压缩 | ✅ `packages/compaction/compaction` | per-member 预算策略 |
+| **per-角色模型**（你的核心诉求） | ❌ | ⭐ `cluster/router` |
+| **结构化 briefing** | ❌ | `cluster/orchestrator` |
+| **依赖自动解锁通知** | ❌ | `cluster/orchestrator` |
+| **群对话协议** | ❌ | `cluster/dialogue` |
+| **预算硬闸 / 成本账** | ❌ | `cluster/telemetry` |
+| **跨供应商交叉评审** | ❌ | router + orchestrator 配合 |
+
+---
+
+## 7. 里程碑（修订）
+
+| 阶段 | 产出 | 验收 |
+|---|---|---|
+| ✅ **M0 基线** | 环境、源码、安装、构建、`--dump-config` | 已完成 |
+| ✅ **M0.5 能力盘点** | 能力矩阵 + 差距表 + 验证 `agent/created` 时序 | 已完成（本文档 §2） |
+| **M1 最小闭环** | `cluster/config` + `cluster/router` + `cluster/bundle` | **改一处 yml 的模型，实际调用随之改变**（核心验收） |
+| **M2 编排** | `cluster/orchestrator`：briefing / 自动解锁 / 轮次 / 预算 / 评审 | 带依赖的 3 任务 DAG 无需人工干预跑完 |
+| **M3 对话 + 遥测** | `cluster/dialogue` + `cluster/telemetry` | 两种 topology 各跑通一场景；对话可回放；成本可见 |
+| **M4 可观测 + 文档** | CLI 命令族、扩展 Web 面板、snapshot 测试、README | `doc-sync` + `typecheck` + `lint` 通过 |
+
+**立即开工项**：M1 的三个包 + `cluster.yml` 骨架。
+
+---
+
+## 8. 风险台账（动态更新）
+
+| 风险 | 等级 | 现状 | 对策 |
+|---|---|---|---|
+| `agent/created` 装 model selection 的竞态 | 中 | 已由 `scope-lifecycle.spec.ts` 证实串行+await | 兜底：`agent/pre-step` 补一次；最坏 fork 加 `agentOptions` |
+| `temperature` 不在 `AgentOptions` | 低 | 已确认 | 采样参数下沉到 adapter route 级；记入 Known Limitations |
+| 上游实验包 breaking change | 中 | 已锁 commit | 只依赖公开服务；每包 README 记录依赖版本；升级走单独 PR |
+| `writeScopes` 无强制力 | 中 | 上游明示 advisory | `tools/pre-execute` 加 guard 做拦截+告警 |
+| Windows 构建链 | 低 | 构建已通过 | 保持全链路在 E:，不改 WSL |
+| E: 剩余 35 GB | 中 | install 已耗 1.5 GB | 如需腾挪，把 pnpm store 指到 D:/F: |
+| Node 未进 PATH | 低 | 每 shell 手动注入 | 建议 `setx` 固化（待你确认） |
+
+---
+
+## 9. 待你确认
+
+1. 是否把 `C:\Program Files\nodejs` 与 `%APPDATA%\npm` 用 `setx` 固化进用户 PATH（免得每次手动注入）？
+2. M1 先做**纯 Host 侧**（config + router + bundle，用 headless profile 验证走通的模型后的日志），还是直接带上一个最小可用的 `cluster.yml` 示例再跑？我倾向前者，1 天出结果。
+3. `cluster/web` 是否等 M3 之后再做（先看清真跑起来缺什么），还是现在就把 `client-ui-agent-team` 的复用方案定下来？
+
+---
+
+## 10. M1 实测进展与阻塞（2026-09-19）
+
+### 10.1 已交付代码（均已构建通过 + 单测通过）
+
+| 位置 | 内容 |
+|---|---|
+| `packages/cluster/config` | `ctx.clusterConfig` 服务：`cluster.yml` 严格校验（未知键/未知别名/错误类型一次性全部报出）、别名与内联路由、`routeFor` / `fallbacksFor` / `member` / `defaultClusterName` |
+| `packages/cluster/router` | `cluster-router` 插件：`agent/created` + `ctx.agentTeams.tryMembership` + `installModelSelection(agent.ctx, ref)`，随 `agent/disposed` 与插件 effect 释放 |
+| `packages/cluster/bundle` | profile 层：禁用 4 个 legacy subagent 工具行，插入 agent-team / tool-agent-team / cluster-config / cluster-router |
+| `packages/cluster/cluster.example.yml` | 可跑通并被测试当作 fixture 的示例文档 |
+| `packages/boot/app-boot/src/profile.ts` | 把 `@deepseek-ai/dsh-cluster-bundle` 加入 `OPTIONAL_BUNDLES`（Web 插件页可见） |
+| 门禁改动 | `tsconfig.base.json` 加 3 条 paths、`tsconfig.host.json` 加 3 条 references |
+
+测试：`packages/cluster` 共 **10 个测试全部通过**；`pnpm run build` EXIT=0。
+
+### 10.2 搭建的端到端验证台（可复用）
+
+- `.dev/mock-openai.mjs`：脚本化 OpenAI 兼容网关，按 `model` 字段分流；Lead 依次发出
+  `spawn_teammate → send_message → wait_agent → 结论文本`，队友返回纯文本。
+  每次请求把 `model` 写入 `.dev/mock-requests.log`，**用于证明"哪个角色用了哪个模型"**。
+- `.dev/verify-upstream.patch.yml`（上游 Team 对照）+ `insert-config.patch.yml` / `insert-router.patch.yml`（增量挂载我们两个插件）。
+- 运行方式：`pnpm dsh --profile headless --patch A --patch B --patch C "<任务>"`（`--patch` 可重复）。
+
+### 10.3 验证台的两个陷阱（都踩过，务必避免）
+
+1. **mock 网关必须每轮重启**。脚本用请求计数决定"第几轮回什么"，进程不重启就会跨运行累积，
+   导致后续运行第一步就直接吐结论文本、看起来"通过"——**前几轮我据此得出的"队友已跑通"结论全部作废**。
+   每轮验证前必须重启 mock（并重新写日志）。
+2. **mock 必须发 `finish_reason`**，否则每轮报 `TRANSPORT: Stream ended without finish_reason`，
+   会伪装成"队友没被创建"。
+3. 顺带记录一个组合陷阱：`session-log-deepseek` 依赖 `deepseekLlmApiExtensions`。
+   若禁用后者，前者会 `pending` 且启动时打印 `1 entry did not activate`。
+   验证时保留 `deepseek-llm-api-extensions`，只禁用 `llm-deepseek` 与 `plugin-package-inventory-deepseek`。
+
+### 10.4 已实施的上游改动（方案 A 的落地）
+
+调研发现关键事实：`SubagentContinuationManager.startContinuable()` **已经完整支持**
+`request.agentOptions`（`packages/subagent/subagent/src/continuation.ts:115`
+`resolveChildAgentOptions(parent, request.agentOptions, childDepth)`，并一路传到子 Agent 创建）。
+缺的只是 `agent-team` 的 `roster.spawn()` 没把它透传出去。因此改动面比预估更小：
+
+| 文件 | 改动 |
+|---|---|
+| `packages/experimental/agent-team/src/types.ts` | `SpawnTeammateRequest.agentOptions?: TeamSpawnRoute`；新增 `TeamSpawnRoute`（provider / model / reasoningEffort / maxTokens） |
+| `packages/experimental/agent-team/src/roster.ts` | 把 `request.agentOptions` 透传给 `ctx.subagents.startContinuable(...)`（Host 侧做一次品牌收敛） |
+| `packages/experimental/tool-agent-team/src/index.ts` | `spawn_teammate` 执行时按 member 名从 `ctx.get('clusterConfig')` 解析路由并作为 `agentOptions` 传入（**结构性查找，不引入包依赖**；服务缺失时静默回退到继承 Lead 路由） |
+| `packages/boot/app-boot/src/profile.ts` | 把 `@deepseek-ai/dsh-cluster-bundle` 加入 `OPTIONAL_BUNDLES` |
+
+设计要点：**路由在"创建时"就确定**，不依赖事件时序，也不依赖模型自觉传参——`cluster.yml` 里
+`members[].route` 是唯一真源。Lead 自身仍由 `cluster-router` 在 `agent/created` 时绑定
+（已实测：Lead 的创建事件可以到达插件监听器）。
+
+**踩坑记录（重要）**：`TeamSpawnRoute` 刻意**不 import `@deepseek-ai/dsh-agent`**。
+`agent-team/src/types.ts` 同时喂给浏览器侧（`./client` 导出），一旦把 Host 的 Agent 包拖进 Client 程序，
+`ctx.sessions` 就会被解析成 Host 的 `SessionStore`，导致 `client-ui-agent-team`
+报 `Property 'binding'/'refreshSubagents'/'retainInfo' does not exist` 三连错。
+改为结构等价的本地类型 + Host 侧一次 `as AgentOptions` 收敛后，全量构建通过。
+
+### 10.5 仍然存在的阻塞：`spawn_teammate` 稳定失败
+
+**现象**：只要 `spawn_teammate` 真正被调用，整个 turn 就以
+`dsh: UNKNOWN: Cannot read properties of undefined (reading 'prepare')` 结束（EXIT=1），
+队友从未被创建（`agent/created` 不会出现第二行）。
+
+**已排除**：
+- **不是我们的插件引起的**——用完全不含 cluster 插件的「仅上游」补丁 + 全新 mock 复现，现象一致（连跑两次稳定复现）。
+- **不是 mock 的锅**——已修复 `finish_reason` 与跨轮状态问题后仍然复现。
+- **不是凭据/禁用行的锅**——`deepseek-llm-api-extensions`、`session-log-deepseek` 均已恢复启用。
+
+**已定位的边界**：工具体（`execute`）从未进入（临时诊断未打印），说明失败发生在
+**工具调度阶段**而非工具内部。agent-loop 的调度入口是
+`ctx.tools[TOOL_RUNTIME_SCHEDULER].prepare(call.exec)`
+（`packages/core/agent-loop/src/tool-calls.ts:170`），
+报错形态与该表达式取到 `undefined` 完全吻合；下一步应在该行插入诊断，确认
+`ctx.tools` 上的内部 symbol 是否在 scoped 视图中丢失。
+
+**复现命令**（约 1 分钟）：
+
+```powershell
+# 1. 启动 mock（每次验证前必须重启！）
+node .dev/mock-openai.mjs
+# 2. 运行
+$env:DSH_HOME='.dsh-home'; $env:MOCK_API_KEY='sk-mock'; $env:DEEPSEEK_API_KEY='sk-mock'
+pnpm dsh --profile headless --patch ../../.dev/verify-upstream.patch.yml "<任务>"
+```
+
+### 10.6 M1 验收结论
+
+- ✅ 配置层、模型路由层、profile 层代码完成，全量构建通过，10 个单测通过
+- ✅ 上游缺口已按方案 A 打开（`agentOptions` 可从 `cluster.yml` 确定性地下发到队友）
+- ❌ **端到端"改 yml 的模型 → 实际调用随之改变"未验收**，被上游 `spawn_teammate` 的
+  `.prepare` 失败挡住；修复点在 `tool-calls.ts:170`，与我们的改动无关
+
+---
+
+### 10.7 阻塞已解开（根因：symbol 身份分裂）
+
+**根因**：`TOOL_RUNTIME_SCHEDULER` 原本用 `Symbol('…')` 定义，而 `@deepseek-ai/dsh-tools`
+在同一个进程里被**加载了两次**——插件加载器按包名走构建产物 `lib/`，CLI 自身经 tsx 走源码 `src`。
+两个模块实例各自求值一次 `Symbol()`，于是 `ToolRuntime` 实例上存的 symbol 与 agent-loop
+查表用的 symbol **身份不同**，`ctx.tools[TOOL_RUNTIME_SCHEDULER]` 恒为 `undefined`，
+报错就落在 `.prepare` 上。
+
+**证据**：在 `runGroup` 插桩后打印出 `ctx.tools` 是 `ToolRuntime` 实例，且其自有 symbol 里
+存在同名 `Symbol(@deepseek-ai/dsh-tools.scheduler)` —— **同描述、不同身份**，正是双实例特征。
+
+**修复**（1 处，1 行）：
+
+```ts
+// packages/core/tools/src/index.ts
+export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol.for('@deepseek-ai/dsh-tools.scheduler')
+```
+
+改为全局注册表 symbol，使这条内部缝对"模块被求值多次"免疫。
+`unique symbol` 类型仍然成立（TS 允许 `Symbol.for()` 用于 `unique symbol` 声明）。
+
+**端到端验收（已通过）**：
+
+```
+cluster 补丁挂载时：  lead-model, lead-model, tester-model, lead-model, lead-model   EXIT=0
+仅上游补丁（对照）：  lead-model, lead-model, lead-model, ...                        EXIT=0
+```
+
+`cluster.yml` 中 `members[tester].route = mock-tester/tester-model`，
+队友的请求确实带上 `tester-model`；移掉 cluster 插件后队友又退回继承 Lead 模型。
+**"改 yml 的模型 → 实际调用随之改变"这条 M1 核心验收成立。**
+
+---
+
+## 11. 交付与仓库状态
+
+### 11.1 已推送
+
+仓库 **[HMUG12/Cluster-Cooperation](https://github.com/HMUG12/Cluster-Cooperation)**，分支 `main`，
+基线为上游 `dsh-0.1.6-alpha.2` 发布提交。推送状态随时变化，以仓库的提交列表为准。
+
+**仓库形态**：`Cluster-Cooperation` 本身就是 **deepseek-harness 的 fork**（保留了上游全部提交历史），
+本地 `deepseek-harness/` 的 `origin` 指向该仓库，原上游已改名为 `upstream`。
+因此后续同步上游只需 `git fetch upstream && git merge upstream/master`，
+提交 PR 也直接可用。本轮方案文档以 `CLUSTER.md` 随代码入库。
+
+提交内容：
+
+| commit | 说明 |
+|---|---|
+| `feat(cluster): declarative Agent Cluster configuration and role-based model routing` | 3 个新包 + 上游 `agentOptions` 透传 + `OPTIONAL_BUNDLES`（28 个文件） |
+| `chore: join the Cluster-Cooperation initial commit` | 与远端初始提交的历史合并（`-s ours`，内容以 fork 为准） |
+
+推送前门禁：`pre-commit`（lint / whitespace / vendor guard / third-party notices）与
+`pre-push`（`pnpm run typecheck`，59.8s）**全部通过**。
+
+### 11.2 本地遗留（均已被 `.gitignore` 忽略，不影响仓库）
+
+- `.dev/`：可复用的验证台（`mock-openai.mjs`、`dump-session.mjs`、三份 patch），
+  以及本轮调试产生的若干 `*.log` 与失效脚本 `build.bat`/`build.ps1`（删除时审批弹窗超时，未清理）。
+- `.dsh-home/`：本地 Harness home，内含验证用的 `cluster.yml` 与会话目录。
+- 外层目录 `E:\新创意构思\Cluster-Cooperation`（`docs/` + 嵌套的 fork 克隆）现在只是**工作区**，
+  它自身不是被推送的仓库。
+
+### 11.3 环境提示
+
+IDE 进程环境在启动时冻结，新开 shell 看不到 `node`。`PATH` 已用 .NET 直写注册表还原并追加
+`%APPDATA%\npm`，**重启 IDE 后生效**；在那之前所有命令都需显式注入
+`$env:PATH="C:\Program Files\nodejs;$env:APPDATA\npm;$env:PATH"`。
+
+---
+
+## 11.4 M2 第一刀：依赖自动解锁（已完成）
+
+上游原文承认这个缺口：**"Task readiness never starts an owner."** —— 任务板会算出 `ready`，
+但没有任何事件告诉 owner 可以开工了，只能等它自己重新 `team_task_list`。
+
+新增包 `packages/cluster/orchestrator`（`@deepseek-ai/dsh-cluster-orchestrator`）：
+
+| 文件 | 职责 |
+|---|---|
+| `src/ready.ts` | **纯函数** `readyNotices(tasks, completedTaskId)`：一次完成事件应该唤醒哪些 owner；以及 `readyMessage()` 的消息文本 |
+| `src/index.ts` | 插件：订阅 `session/event` 过滤出 durable `team/task` 提交 → 解析 Lead 与会话 → 串行投递 `[TASK READY]` 给每个被解锁的 owner |
+
+设计要点：
+
+- **不轮询**。唤醒搭在"改变了任务板的同一个事实"上——`team/task` 的 durability commit。
+- **判定逻辑全在纯函数里**，因此规则本身可以脱离活的 Team 被测；投递层只是薄适配。
+- **幂等**：只对"刚刚完成、且在被解锁任务的 `blockedBy` 里"的完成发通知，
+  重放同一条事件、或重新读一遍没动过的板子，都不会产生第二次唤醒。
+- **串行投递**：所有投递排在一条 promise 链上，慢消息不会让后一次完成超越前一次。
+- 投递失败只记 warning，绝不让"完成任务的 turn"失败。
+
+`config.dependencyAutoUnlock` 默认 `true`；bundle 的 patch 已把它一并挂载
+（insert 顺序：agent-team → tool-agent-team → cluster-config → cluster-router → cluster-orchestrator）。
+
+---
+
+## 11.5 M2 第二刀：结构化 briefing（已完成）
+
+OAT 的核心机制之一是"结构化任务派发"——`spawn_agent` 不是传一句话，而是传
+`mission / deliverables / definition_of_done / quality_bar`。dsh 的 `spawn_teammate`
+只有 `name / description / prompt`，这些约束**每次派发都要靠 Lead 重新打一遍**，且很容易漏。
+
+这一刀把它变成**配置即契约**：写进 `cluster.yml` 一次，每次派生都自动带上。
+
+`cluster.yml` 新增四个可选字段（member 级）：
+
+```yaml
+- name: coder-backend
+  model: coder
+  mission: Turn the agreed interface into working server-side code.
+  deliverables:
+    - Implementation under src/server/
+    - Unit tests covering the new endpoints
+  definitionOfDone:
+    - The design document's interface is implemented without signature drift
+  qualityBar:
+    - No new lint or type errors
+```
+
+落点：
+
+| 文件 | 改动 |
+|---|---|
+| `cluster/config/src/briefing.ts` | **新增纯函数** `renderBriefing({clusterName, member})` |
+| `cluster/config/src/document.ts` | 成员的 allowed keys 增加 4 项并读取 |
+| `cluster/config/src/index.ts` | 新增 `briefingFor(clusterName, memberName)` |
+| `experimental/tool-agent-team/src/index.ts` | `configuredRoute` 升级为 `configuredMember`，把 briefing 插在**身份提醒之后、模型任务之前** |
+
+**关键语义决定**（由测试逼出来的）：briefing 的判据是**问责**
+（`mission` / `deliverables` / `definitionOfDone` / `qualityBar` 至少有一项），
+而被写作用域和 token 预算只是"顺带"——只声明后两者的成员**不产生 briefing 块**，
+保持"队友拿到的就是 Lead 原样那句任务"的既有行为。这条规则写进了 `renderBriefing` 的契约注释。
+
+渲染形状：
+
+```
+<cluster-briefing member="coder-backend" cluster="default">
+Mission: …
+Deliverables:
+- …
+Definition of done:
+- …
+Quality bar:
+- …
+Advisory write scopes: src/server/
+Token budget: 400000
+</cluster-briefing>
+```
+
+**验证**：`packages/cluster` **21 个测试通过**（其中 4 个覆盖 briefing：完整渲染、
+只声明路由或 Lead 时静默、省略未声明小节、非字符串数组要报错），
+`tool-agent-team` 的 **22 个测试全部通过**（身份前缀契约未被破坏）。
+
+---
+
+## 11.6 M2 第三刀：评审回路（已完成）
+
+配置里早就声明了 `orchestration.review`，但一直是空头支票——**"完成的活没人把关"**：
+任务一旦 completed 就被当成交付，Lead 只能自己再读一遍 diff。
+
+现在它变成真行为，仍然是事件驱动 + 纯函数判定。
+
+`cluster.yml`：
+
+```yaml
+clusters:
+  default:
+    orchestration:
+      review:
+        enabled: true
+        reviewer: reviewer   # 必须是本 cluster 已声明的成员
+        maxRetries: 2        # 被驳回几次后升级给 Lead
+```
+
+两条规则（都挂在同一个 durable `team/task` 提交上）：
+
+1. **完成即送审**：非评审任务一旦 `completed`，自动建一个评审任务
+   （`Review: <原标题>`、`cluster-review-of: <taskId>` 标记、继承被审任务的写作用域），
+   由 Lead 身份 `reassign` 给配置的 reviewer，并投递 `[REVIEW]` 通知。
+2. **驳回即计数**：当某任务重新变成非 completed 状态、且它已有评审记录时，
+   驳回次数 = **为它开过的评审任务数**（板上即全部状态，不需要隐藏计数器）。
+   未超预算投 `[RETRY k/max]` 给原 owner；超预算投 `[ESCALATE]` 给 Lead，不再自动重试。
+
+四条**刻意的拒绝条件**（都在 `reviewRequest()` 里）：
+
+- 不评审"评审任务"本身（否则无限递归）；
+- 不评审 reviewer 自己的产出（自审没有意义）；
+- 同一完成事件已有评审记录时不再重复开（这是事件重放安全的保证）；
+- 未配置 reviewer / `enabled: false` 时整条规则不生效。
+
+**幂等键用的是 `taskId::revision`**——revision 每次变更自增，所以事件重放会被抑制，
+而任何真实变更都能通过；集合有上限（512）避免无界增长。
+
+落地：`cluster/config/src/document.ts`（`orchestration.review` 解析 + 交叉校验 reviewer
+必须是本 cluster 声明过的成员）、`cluster/config/src/index.ts`（`reviewFor()`）、
+`cluster/orchestrator/src/review.ts`（新增纯函数 `reviewRequest` / `retryNotice` / 三个渲染器）、
+`cluster/orchestrator/src/index.ts`（接线）。
+
+**验证**：`packages/cluster` **35 个测试通过**（新增 9 个评审回路 + 5 个评审配置）。
+
+---
+
+## 11.7 M2 第四刀：用量记账与预算执行（已完成）
+
+`cluster.yml` 从第一个版本起就有 member 级 `tokenBudget`，**至今没有任何消费者**——和评审回路之前的状态一模一样。
+这一刀把它变成真行为，仍然沿用"事件驱动 + 纯函数判定"的同一套骨架。
+
+落地：
+
+| 文件 | 改动 |
+|---|---|
+| `cluster/config/src/index.ts` | 新增 `budgetFor(clusterName, memberName)`（Lead 不声明预算） |
+| `cluster/orchestrator/src/spend.ts` | **新增纯模块**：`addUsage` / `billableTokens` / `overBudget` / `budgetNotices` |
+| `cluster/orchestrator/src/index.ts` | 订阅 `assistant/message` 折算花费，越线时通知成员与 Lead，新增 `budgetWatch` 配置项 |
+
+四个关键设计决定：
+
+1. **计费口径是"四种 token 之和"**。`TokenUsage` 的计数是**互斥**的：`inputTokens` 只算未命中缓存的部分，
+   缓存读写单独上报。所以 `billable = input + cacheRead + cacheWrite + output`，
+   且**刻意不用** adapter 可选的 `totalTokens`（它可能缺省）。
+2. **`overBudget` 用严格大于**。正好花完预算的成员算"在预算内"——这才是写下那个数字的人对"预算"的理解。
+3. **恰好一次靠 seq 单调性**，不靠去重集合。任务板那条规则用 `taskId::revision` 作键，
+   但花费不行：只折算 `seq` 大于该会话"上次已折算 seq"的事件，天然幂等，且不依赖会因上限被淘汰的键集合。
+4. **成员未上榜时不缓存**。teammate 的第一次用量可能在其 roster 行尚未落定时到达，
+   把这次 miss 缓存成"无预算"会永久性废掉该成员的预算，所以只有解析成功才缓存。
+
+投递策略：**成员收到收尾通知（可执行的那条），Lead 收到超额代价**，两条都是 best-effort、
+各自独立捕获异常——Lead 那条如果被拒（向自己发消息），不能连带丢掉成员那条。
+通知按**每会话一次**发送。
+
+**验证**：`packages/cluster` **47 个测试通过**（新增 10 个用量 + 2 个预算），
+`tsc -b tsconfig.host.json` EXIT=0，oxlint 0 warning 0 error，
+四项文档门禁（配对 1011 / 模型体验 295 / 链接 2011 / 折行 2035）与 `doc-standard.spec` 22 项全绿。
+
+**已知边界**：只通知不强停（没有取消成员这一轮），且每会话只通知一次——
+两条都写进了 README 的 Known Limitations。
+
+## 11.8 M2 第五刀：评审裁决成为解锁闸门（已完成）
+
+之前的行为有个语义漏洞：任务一到 `completed` 就唤醒下游，**评审形同虚设**——
+下游在裁决出来之前就开工了。这一刀把"释放下游"的事实从"交付"改成"裁决"。
+
+实现只有两处：`ready.ts` 新增纯函数 `releaseDecision(tasks, completedTaskId, reviewOwed)`，
+`index.ts` 在唤醒前先判断"这次完成是否仍欠评审"。规则三条：
+
+- 完成事件**仍欠评审** → 谁都不唤醒（下游等裁决）；
+- **评审任务完成**（即批准）→ 反查 `reviewedTaskOf`，唤醒**被审任务**的下游；
+- 未启用评审（`reviewLoop: false`）→ 维持原样，立刻唤醒。
+
+顺带把 `openReview` 的签名从"自己算 request"改成"接收已算好的 request"：这样
+"释放判定"与"实际开出的评审任务"读的是同一块板子，不会各自算出不同结论。
+
+**验证**：`packages/cluster` **51 个测试通过**（`ready.spec.ts` 新增 4 个，含一条
+"交付不释放 / 批准才释放"的组合断言），`tsc -b tsconfig.host.json` EXIT=0，
+四项文档门禁（配对 1011 / 模型体验 295 / 链接 2011 / 折行 2035）全绿。
+
+**已知边界**：始终不批准的 reviewer 会让下游永久阻塞，只能靠人工或 Lead 打破——
+已写进 README 的 Known Limitations。
+
+## 11.9 M2 第六刀：声明期一致性校验（已完成）
+
+`document.ts` 的模块注释写着它存在的理由是"让拼写错误在加载期失败而不是静默路由到错误的模型"，
+但有三处静默歧义漏网：
+
+1. **`tokenBudget` / `maxConcurrency` 未做正整数校验**。`tokenBudget: 0` 或负数会被接受，
+   而 §11.7 的判定是 `billable > budget`——于是该成员**第一次调用就越线**。
+   也就是说这一刀护住的正是刚做出来的功能。
+2. **重复成员名**。路由、briefing、预算全部**按名解析**，重名时静默落到第一行，
+   第二行声明的模型意图被无声丢弃。
+3. **`enabled: false` 仍强制要求 reviewer**。关掉评审反而比打开评审更难写。
+
+三处都在 `readClusterDocument` 内修掉，并新增 4 个测试覆盖：0/-1/1.5/`'many'` 四种非法预算、
+重名成员、非正整数并发上限、以及"显式关闭评审可以不写 reviewer"。
+
+**验证**：`packages/cluster` **55 个测试通过**（config 19 → 23），`tsc -b tsconfig.host.json` EXIT=0。
+
+## 11.10 M3 前置：修正"通知 Lead"的通道，并定下 M3 的状态表达（已完成 + 设计结论）
+
+### 缺陷（我上一版自己引入的）
+
+`mailbox.ts:121` 有一条硬约束：**成员不能给自己发消息**（`TEAM_SELF_MESSAGE`）。
+而 orchestrator 只持有 Lead 这一个凭据，于是它有两条通知的目标写了 `'lead'`——
+发送者正是 Lead 自己，**必然抛错、被 `tryDeliver` 吞掉，Lead 永远收不到**：
+
+1. 评审重试耗尽时的 `[ESCALATE]`（原设计"交给 Lead 决定"）；
+2. 预算越线时那半条"告诉 Lead 超额代价"。
+
+修法不是绕过约束，而是**顺着唯一的合法边**：只有队友能对 Lead 说话。
+两条通知都改为**发给能转达的那个成员**，并在文本里明确要求它自己 `send_message target "lead"`；
+无 owner 的升级没有任何合法收件人，改为 `logger.warn` 交给运维，
+不再尝试注定被拒的投递。已知边界写进了 README。
+
+### M3 设计结论（先想清楚再写代码）
+
+`TeamService` 的公开面只有 `sendMessage / createTask / getTask / listTasks / updateTask /
+interrupt / waitForChange / listMembers`。由此定下三条 M3 的设计前提：
+
+1. **任何面向 Lead 的通知，只能"由队友转达"或"落在任务板上"**，没有第三种通道。
+   这是所有对话协议的共用约束。
+2. **投票不需要新状态，但需要新语义**。任务板能表达的只有"行 + 状态"。上一轮试多人评审时
+   撞到的正是"旧评审行同时充当计数凭证与幂等守卫"，于是"本轮已满"与"已审过"无法区分。
+   可行解法是**把轮次编号显式化**（如 `Review #2:` 前缀），让轮次从"行数的推论"变成"板上事实"。
+3. **辩论/投票的裁决必须落成一次 `createTask` / `updateTask`**，否则 Lead 看不到结论、
+   下游也无法据此解锁。
+
+三条合起来意味着 M3 第一期应当选**广播**：它只需"Lead → 多个成员"这条**已存在**的合法边，
+不需要新状态，而且是圆桌/辩论/投票三种协议的公共基础设施。
+
+**验证**：`packages/cluster` **55 个测试通过**（`retryMessage` 与 `budgetNotice` 的断言
+改为校验"由成员转达"的措辞），`tsc -b tsconfig.host.json` EXIT=0。
+
+---
+
+## 12. 下一步（按优先级）
+
+1. **M2 编排收尾**：只剩轮次调度与上下文压缩策略。结构化 briefing、依赖自动解锁、评审回路、
+   用量记账与预算执行都已完成并验证。
+2. **M3 第一期：广播**。设计结论（§11.10）指向它：只需已存在的"Lead → 多成员"合法边，
+   不需要新任务板状态，且是圆桌/辩论/投票的共同基础设施。实现形态已探明——
+   `defineTool` + `agent.ctx.tools.register`（见 `tool-agent-team/src/index.ts:216`），
+   可以直接挂在 **`cluster-orchestrator` 包内**，**不必新建包**：新建包会触发 `pnpm install`，
+   而当前环境下那个 postinstall 会挂在 lefthook 下载上（见前文环境说明）。
+   注意新增工具会进入模型的工具清单，必须同步 Model Experience 文档与工具目录门禁。
+3. **M4 可观测**：`dsh cluster status/tasks/agents/graph/cost` 命令族。用量记账（§11.7）已经把
+   `cost` 需要的数据折好了，CLI 层可以直接读；再复用上游 `client-ui-agent-team` 扩展 Web 集群面板。
+4. **纪律性提醒**：本项目反复出现的模式是"配置先声明、消费者后补"——`tokenBudget`、
+   `orchestration.review`、`briefing` 都经历过这个阶段。新增任何配置字段时，要么同批给出消费者，
+   要么在 README 的 Known Limitations 里写明它当前无人读取。
