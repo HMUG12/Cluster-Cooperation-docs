@@ -676,6 +676,50 @@ interrupt / waitForChange / listMembers`。由此定下三条 M3 的设计前提
 **验证**：`packages/cluster` **55 个测试通过**（`retryMessage` 与 `budgetNotice` 的断言
 改为校验"由成员转达"的措辞），`tsc -b tsconfig.host.json` EXIT=0。
 
+## 11.11 诚实性修正：`topology` 与 `maxConcurrency` 是空转的（已完成）
+
+复查 config 包时发现一处比"未消费"更糟的状态：`topology` 与 `maxConcurrency` 被解析、
+被枚举/范围校验、存进 `ClusterDocument`……然后**连访问器都没有**
+（`grep topology packages/cluster/config/src/index.ts` 零命中）。
+
+而 `README` 的示例里赫然写着 `topology: mesh`——**这会让人以为拓扑已经生效**。
+
+它们真实的效力是零：谁能和谁说话完全由 Team 邮箱的邻接规则决定，
+同时运行多少个成员没有任何东西限制。这一刀不发明消费者，只**把假象改成事实**：
+在 config README 的 Known Limitations 里写明两者不改变任何运行时行为，
+并说明"声明它们只是为了让文档能写下意图，有消费者之前会一直空转"。
+双语同步，行数仍逐行对齐。
+
+**验证**：四项文档门禁全绿（配对 / 模型体验 / 链接 / 折行）。
+
+## 11.12 门禁债：fork 在全量门禁下并非全绿（一项已修，一项待做）
+
+跑此前**从未跑过**的目录类门禁，发现 fork 并不全绿，责任都在我们新增的 cluster 包：
+
+| 门禁 | 结果 | 原因 / 处置 |
+|---|---|---|
+| `verify-tool-catalog` | ✅ | 未被影响（我们没有 `tool-*` 包） |
+| `verify-config-catalog` | ❌ → ✅ | `docs/config-catalog.md` 过期（我们改过配置 schema）；**已重新生成并提交** |
+| `verify-cordis-catalog` | ❌ 仍红 | `service ctx.clusterConfig … has no SERVICE_PAGE entry`，另有 3 个类型未分类 |
+
+`gen-cordis-catalog.ts` 是 fail-closed 的双向校验：每个 `ctx.<key>` 服务必须映射到**恰好一个**
+subsystems 页（`SERVICE_PAGE`），生成器再把 API 区段注入该页；每个服务方法引用的类型必须归类到
+`linkedTypePages`（带文档页）、`foundationTypeNames` 或 `typeLinkExemptions`。
+
+我先加了 3 条 `typeLinkExemptions` 把类型违规消掉，随后**主动撤掉**：`SERVICE_PAGE` 要求的
+那份子系统页无论如何都得建，而页面一旦存在，这 3 个类型就该走 `LINK_MAP` 指向它
+（`docs/subsystems/agent-team.md` 里那些 `ts type-equiv` 块正是这类页面的写法），例外只是兜底。
+落下一个马上要被替换的捷径是浪费。
+
+**下一刀（已定）**：新建 `docs/subsystems/cluster.md` 与其中文对照页（含 `type-equiv` 块与
+API 区段标记）、在 `LINK_MAP` 与 `SERVICE_PAGE` 登记、加进 `docs/subsystems/README.md` 导航、
+生成配对记录，再让 `verify-cordis-catalog` 与 `verify-type-equiv` 转绿。
+顺带产出本项目**第一份真正的子系统文档页**（此前只有包 README）。
+
+**尚未探完**：`gen-cordis-api` / `gen-doc-graphs` / `gen-dependency-catalog` / `verify-export-jsdoc`
+四项的探测被审批打断，尚未确认是否同样受影响——下一轮**开工前先跑一遍**，
+避免又出现"代码写完才发现门禁"。
+
 ---
 
 ## 12. 下一步（按优先级）
@@ -683,11 +727,17 @@ interrupt / waitForChange / listMembers`。由此定下三条 M3 的设计前提
 1. **M2 编排收尾**：只剩轮次调度与上下文压缩策略。结构化 briefing、依赖自动解锁、评审回路、
    用量记账与预算执行都已完成并验证。
 2. **M3 第一期：广播**。设计结论（§11.10）指向它：只需已存在的"Lead → 多成员"合法边，
-   不需要新任务板状态，且是圆桌/辩论/投票的共同基础设施。实现形态已探明——
-   `defineTool` + `agent.ctx.tools.register`（见 `tool-agent-team/src/index.ts:216`），
-   可以直接挂在 **`cluster-orchestrator` 包内**，**不必新建包**：新建包会触发 `pnpm install`，
-   而当前环境下那个 postinstall 会挂在 lefthook 下载上（见前文环境说明）。
-   注意新增工具会进入模型的工具清单，必须同步 Model Experience 文档与工具目录门禁。
+   不需要新任务板状态，且是圆桌/辩论/投票的共同基础设施。**但落点必须先定**：
+   `scripts/gen-tool-catalog.ts` 的注释写着"manifest 对每个 on-disk `tool-*` 包做校验"，
+   而且它**逐包显式 import** 每个工具插件来启动收集 schema。于是两条路：
+   (a) 挂在 `cluster-orchestrator` 内（`agent.ctx.tools.register`，范式见
+       `tool-agent-team/src/index.ts:216`）——改动最小，但新工具会**绕过工具目录体系**，
+       与上游惯例不符；
+   (b) 新建 `packages/cluster/tool-cluster/`（`tool-*` 命名才会被目录校验覆盖）——符合惯例，
+       但必须同时改 `gen-tool-catalog.ts` 的 import 清单与启动接线、重新生成
+       `docs/tool-catalog.md`，并过 `verify-tool-catalog` 门禁。
+   前一条路验证成本低但留下结构债，后一条路要先读懂目录生成器再动手。**新建包现在可行**：
+   `CI=true pnpm install` 已验证 EXIT=0（见 §11.10 的环境说明）。
 3. **M4 可观测**：`dsh cluster status/tasks/agents/graph/cost` 命令族。用量记账（§11.7）已经把
    `cost` 需要的数据折好了，CLI 层可以直接读；再复用上游 `client-ui-agent-team` 扩展 Web 集群面板。
 4. **纪律性提醒**：本项目反复出现的模式是"配置先声明、消费者后补"——`tokenBudget`、
