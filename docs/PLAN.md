@@ -1107,6 +1107,34 @@ task-5 Verdict:   [pending]    blockedBy=["task-3","task-4"]
 
 **仍未做**：把四个工具提升为 `tool-*` 包以进入工具目录。
 
+## 11.22 M4 第一刀：`/cluster` 命令（已完成）
+
+M4 的形态在调查后确定：**斜杠命令**，而不是 `dsh` 子命令。理由：集群状态是**会话内的**，
+而 `/cluster` 恰好运行在同一个会话里、能直接读 `agentTeams`；`dsh cluster status` 反而要先定位会话。
+仓库里的 `/goal`、`/feedback`、`/compact` 也都是这个形态，`packages/<域>/command-*/` 是既有公约。
+
+新增 `packages/cluster/command-cluster`，四条只读子命令：
+
+| 子命令 | 输出 |
+|---|---|
+| `/cluster`（默认）/ `status` | 集群名、名册按状态计数、可触达 teammate 数、任务板按状态计数与 pending 的 ready/waiting |
+| `/cluster tasks` | 每行一个共享任务：id、状态、标题、owner、就绪状态与全部阻塞项 |
+| `/cluster agents` | 每个成员一行（Lead 在前）：名字、状态、角色、模型、诊断 |
+| `/cluster graph` | 每条依赖一行：谁在等、等谁 |
+
+`cost` 需要把编排器内部的花费折算暴露成服务接口，**留给下一刀**（已写进 README 的 Known Limitations）。
+
+### 顺带修掉两处既有缺陷（都是这次才暴露的）
+
+1. **4 个 cluster 别名被放进了 `tsconfig.base.json` 的"生成区"内部**——生成器重新生成时不会包含它们，
+   于是 `gen-tsconfig-paths` **每次都失败**（我此前的门禁清单里恰好没有这一项，所以直到这次才暴露）。
+   已移到 marker 之外的手写区并注明原因，该门禁现在通过。
+2. **生成的中英 config 目录需要同步**：新包进入目录后，中文侧必须补上对应行，
+   否则双语配对会在"第 211 个链接目标"处分歧。已补齐并重记录。
+
+**验证**：新包 **10 个测试通过**；`tsc -b tsconfig.host.json` EXIT=0；oxlint 0 warning 0 error；
+双语 README **109:109** 对齐；配对 **1013 对**一致；模型体验门禁 **296 个 README** 全通过（`explained none` 103）。
+
 ---
 
 ## 12. 下一步（按优先级）
