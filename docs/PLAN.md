@@ -711,10 +711,23 @@ subsystems 页（`SERVICE_PAGE`），生成器再把 API 区段注入该页；�
 （`docs/subsystems/agent-team.md` 里那些 `ts type-equiv` 块正是这类页面的写法），例外只是兜底。
 落下一个马上要被替换的捷径是浪费。
 
-**下一刀（已定）**：新建 `docs/subsystems/cluster.md` 与其中文对照页（含 `type-equiv` 块与
-API 区段标记）、在 `LINK_MAP` 与 `SERVICE_PAGE` 登记、加进 `docs/subsystems/README.md` 导航、
-生成配对记录，再让 `verify-cordis-catalog` 与 `verify-type-equiv` 转绿。
-顺带产出本项目**第一份真正的子系统文档页**（此前只有包 README）。
+**已修复（本次）**：新建 `docs/subsystems/cluster.md` 与中文对照页（各 108 行，已进
+`docs/subsystems/README.md` 导航表），在 `gen-cordis-catalog.ts` 里登记 `LINK_MAP`
+（`ClusterSpec` / `MemberSpec` / `ReviewSpec` → `cluster.md`）与 `SERVICE_PAGE`
+（`clusterConfig: 'cluster.md'`），并在 `gen-doc-graphs.ts` 里补上它**自己的** fail-closed
+服务角色分类 `SERVICE_ROLES`（`mode: 'core'`）。生成器随后重写了四份产物：
+`docs/config-catalog.{md,zh}`、`docs/capability-seams.{md,zh}`、
+`docs/event-producer-consumer.{md,zh}`、`packages/extensions/tool-cordis/src/api-catalog.ts`。
+
+**一条重要的协作机制（差点漏掉）**：生成器**只写英文侧**。英文生成源一变，中文对照就必须由
+**同一次改动**补齐（`docs/i18n/README.md` 的规则），否则配对门禁变红——而它校验的是**结构性签名**
+（标题层级、逐字代码块、表格行列数、列表种类与项数、链接目标），**不是行数**。
+我那个 `pairlines` 助手只适用于手写对照，用在生成文档上会误报。
+另一个坑：`config-catalog` 的重新生成在**上一轮提交**里就已产生，但当时没跑配对门禁，
+债留到了这一轮才被发现——**改了生成物就要立刻跑配对门禁**。
+
+**验收**：`verify-translation-pairing` 1012 对全一致；`md-links` / `md-wrap` /
+`cordis-catalog` / `cordis-api` / `doc-graphs` / `config-catalog` / `type-equiv` **七项全 0**。
 
 **八项门禁探完，全景如下**：
 
@@ -722,7 +735,7 @@ API 区段标记）、在 `LINK_MAP` 与 `SERVICE_PAGE` 登记、加进 `docs/su
 |---|---|
 | `verify-tool-catalog` / `verify-dependency-catalog` / `verify-export-jsdoc` | ✅ |
 | `verify-config-catalog` | ✅（本次修复） |
-| `verify-cordis-catalog` / `verify-cordis-api` / `verify-doc-graphs` | ❌ **同一个根因** |
+| `verify-cordis-catalog` / `verify-cordis-api` / `verify-doc-graphs` | ❌ → ✅（三者同根因，本次一并修复） |
 
 关键发现：`gen-cordis-api` 与 `gen-doc-graphs` **都复用** `projectCordisCatalog`，
 因此三者报的是**同一批**三个类型违规（`cordis-catalog` 额外多一条 SERVICE_PAGE）。
