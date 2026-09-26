@@ -978,6 +978,46 @@ E2E 断言 29 次调用全绿。**这是本项目第一次"跑出来"而不是"�
 且只驱动了 `motion` 一条链，`broadcast_message` 与 `roundtable` 尚未被 E2E 跑过
 （三者共用 `broadcastTargets` 与 `attempt`，但各自的 execute 仍需实跑）。
 
+## 11.19 M3 验证（二）：把 E2E 收进仓库（已完成）
+
+上一轮的缺口是"E2E 三件套在 `.dev/`（被 gitignore），本机可复跑但无法从仓库复现"。
+这一轮按**仓库自己的 E2E 公约**把它收进仓库：
+
+| 文件 | 作用 |
+|---|---|
+| `apps/cli/tests/cluster-motion.e2e.ts` | 起真实 CLI，断言 **session 事件日志** |
+| `apps/cli/tests/profiles/headless/tests/fixtures/cluster-motion-llm.mjs` | 确定性、无密钥的 `LlmAdapter` fixture |
+
+结果：**1 passed，15 秒**，无密钥、无网络、确定性执行。
+
+### 三个关键决定
+
+1. **不新建位置，沿用仓库范式**。E2E 放 `apps/cli/tests/*.e2e.ts`（由 `vitest.e2e.config.ts` 收集），
+   模型替换沿用 `profiles/headless/tests/fixtures/*.mjs` 的 fixture 适配器约定（对照 `team-llm.mjs`）：
+   **靠 teammate 身份提醒区分角色，靠对话内容选择下一步**。
+2. **不改 `apps/cli` 的依赖清单**。profile 无法按包名解析 `@deepseek-ai/dsh-cluster-bundle`
+   （bundle 先按 dsh 安装锚点解析，而该包不是本 app 的依赖）。我没有加依赖、也没有复制补丁，
+   而是**直接 `--patch` 引用 cluster bundle 自己的 `cordis.patch.yml`**：补丁里的插件名从补丁自身位置解析，
+   于是 **bundle 仍是"集群挂载了什么"的唯一事实来源**。
+3. **断言 session 事件，而不是我自己的痕迹**：两张 `Ballot:` 均 completed、
+   `Tally:` 的 `blockedBy` 等于两张票的 id、描述含 `cluster-owner: reviewer`、名册为三个 teammate、
+   `tool/call` 含 `motion`，以及**计票通知里带着 `0 abstain of 2 ballots` 与 `claim nothing`**。
+
+### 过程中修掉的两个 fixture 缺陷（都是我的）
+
+1. **角色无关的守卫**：我照抄 `team-llm.mjs` 的"工具齐全性"前置检查，但 **teammate 没有 `motion`**
+   （Lead 专属）→ 每个 teammate 请求都抛错 → Lead 无限等待 → CLI 挂到被 90 秒超时杀掉。
+   改为**按角色检查**（Lead 要 `motion`，teammate 要任务板工具）。
+2. **给 Lead 的读板循环加界**：超过 12 次 `team_task_list` 就输出 `CLUSTER_MOTION_STUCK`。
+   把"挂住 90 秒后被杀、报错里什么都没有"变成"可读的失败"——这是这次能快速定位的直接原因。
+
+**验证**：E2E **1 passed（15 秒）**；`packages/cluster` 110 个测试通过；`tsc -b tsconfig.host.json` EXIT=0；
+oxlint 0 warning 0 error；**15 项门禁全 0**（含全部目录生成器与 `verify-application-entrypoints`）。
+`scripts/repo-files.spec.ts` 有 9 项软链遍历用例在本机失败，与本次改动无关（新增的是普通文件，用例自身要建软链）。
+
+**仍然缺的**：只覆盖 `motion` 一条链，`broadcast_message` 与 `roundtable` 的 execute 尚未被 E2E 跑过。
+harness 现在可复用，补两条链属于增量工作。
+
 ---
 
 ## 12. 下一步（按优先级）
