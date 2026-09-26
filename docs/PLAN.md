@@ -1018,6 +1018,36 @@ oxlint 0 warning 0 error；**15 项门禁全 0**（含全部目录生成器与 `
 **仍然缺的**：只覆盖 `motion` 一条链，`broadcast_message` 与 `roundtable` 的 execute 尚未被 E2E 跑过。
 harness 现在可复用，补两条链属于增量工作。
 
+## 11.20 M3 验证（三）：三条协议全部跑通（已完成）
+
+上一轮只覆盖了 `motion`。这一轮补齐另外两条，**三种对话协议的 execute 现在都有仓库内的 E2E**：
+
+| 文件 | 覆盖的链路 | 用时 |
+|---|---|---|
+| `apps/cli/tests/cluster-motion.e2e.ts` | 投票：两张选票 → 屏障 → 带计数的交接 → 计票完成 | 15s |
+| `apps/cli/tests/cluster-roundtable.e2e.ts` | 圆桌：两份答卷 → 屏障 → 汇总任务（携带答卷清单）→ 汇总完成 | 18s |
+| `apps/cli/tests/cluster-broadcast.e2e.ts` | 广播：一次**默认全体**扇出 → 三人各自应答 | 13s |
+
+各配一份确定性 fixture 适配器，由 `vitest.e2e.config.ts` 的 include 自动收集，
+因此与既有 E2E 一起在 e2e 套件里执行（**无密钥、无网络**）。
+`vitest run --config vitest.e2e.config.ts apps/cli/tests/cluster-*.e2e.ts` → **3 passed / 20.7s**。
+
+**广播这一条额外覆盖了"默认全体目标"路径**——motion 与 roundtable 用的都是显式名单，
+`broadcastTargets` 的默认分支此前从未被执行过。它的断言直接读工具结果自身的 JSON：
+`{"delivered":[coder accepted, tester accepted, reviewer accepted],"skipped":[]}`
+——**"没人被跳过"成了被断言的事实**，正是 §11.17 触达修复生效的位置。
+
+### 又一次"断言比被测代码更天真"
+
+broadcast 首跑即失败，原因在我自己：断言里找的是未转义的 `"delivered"`，
+而**工具结果的 JSON 是双重转义的**。改为**解析工具结果自身的 JSON** 再断言，而不是比字符串。
+同一形态的错误在三个 fixture 里各出现一次（猜日志形状），结论一样：**能解析的就该解析**。
+
+**验证**：三条 E2E **3 passed / 20.7s**；**15 项门禁全 0**；oxlint 0 warning 0 error。
+
+**M3 到这里的真实状态**：三种对话协议（广播 / 圆桌 / 投票）**都已实现、有单元测试、并各自被真实 CLI 跑通**。
+仍未做的只剩**辩论**——唯一需要新任务板状态的协议（回合顺序），以及把"三条链"写进 CI 的常规门禁说明。
+
 ---
 
 ## 12. 下一步（按优先级）
