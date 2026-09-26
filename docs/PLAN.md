@@ -931,6 +931,53 @@ oxlint 0 warning 0 error，文档门禁全绿（配对 1012 / 模型体验 295 /
 `provisioning` 这类目标纯函数测试**永远发现不了**——因为它不在"成员是谁"的语义里，
 而在"成员此刻能不能被触达"的语义里。
 
+## 11.18 M3 验证：让协议真的跑一遍，并修掉"让成员先 claim"（已完成）
+
+上一轮我承认了最大的缺口：**三个工具的 `execute` 从未执行过**。这一轮把它补上，方法是
+**进程外 E2E**——`.dev/mock-motion.mjs` 是一个会判别的脚本网关（按模型分别应答），
+配合 `motion-cluster.yml` + `--patch` 叠加，驱动**真实 CLI + 真实 Agent Teams 服务**跑完一轮投票。
+
+### 跑出来的结果（每一条都有日志证据）
+
+- `motion` 真执行：返回 `tally: task-3`、`ballots: [coder→task-1, tester→task-2, status: accepted]`、`skipped: []`
+- tally 建立时 **`"blockedBy":["task-1","task-2"]`**——**两张票都是它的阻塞项**
+- 两张票各自由真实 teammate 读、写 `vote: for`、完成 ✓
+- 最后一张票落地后，`handoff` 把 tally 指给 reviewer，通知里带着 **`2 for, 0 against, 0 abstain of 2 ballots`**
+  ——**屏障成立，且计数是从选票行上读出来的**，不是谁报的
+- 计票人被唤醒时 tally 为 `in_progress` + `ownerName: reviewer`，完成后 `"status":"completed"` ✓
+- 断言脚本 `assert-motion.mjs`：**`all claims hold across 29 scripted calls`**（可复跑）
+
+### 途中修掉的 mock bug（不是产品问题）
+
+1. 会话标题那次辅助模型调用**吃掉了一个脚本步**，导致 `tester` 没被派生 → 改为识别标题调用、不推进回合计数。
+2. 从请求体里取 revision 的正则匹配不到**被转义的** JSON（`\"revision\":`）→ 改为解析最新 tool 结果并递归找数字字段。
+3. teammate 脚本在完成选票后无限重复 `send_message` → 改为发一次再以文本收尾。
+
+### 挖出的**真产品缺陷**：让已经指派过的成员"先 claim"
+
+任务板对 `claim` 的判定是 `status === 'pending'`（`task-board.ts:137`），
+而编排器**在建行后立刻用 `reassign` 指派**（选票、答卷、汇总、计票、评审任务全都如此）
+→ 成员读到的行已是 `in_progress`。于是**五处指令里的"先 claim"必然抛 `TEAM_TASK_BLOCKED`**：
+
+| 位置 | 原指令 | 处置 |
+|---|---|---|
+| `handoff.ts` 交接通知 | "then claim using that revision" | 改为"已指派给你，无需 claim；完成后 complete" |
+| `motion.ts` 选票描述 | 同上 | 同上 |
+| `roundtable.ts` 答卷描述 | 同上 | 同上 |
+| `roundtable.ts` 汇总描述 | "Claim it with the current revision" | 改为"释放时即指派给你" |
+| `review.ts` 评审通知 | 同上 | 同上 |
+
+**保留 claim 的两处**是正确的、也必须保留：`ready.ts` 的 `[TASK READY]` 通知（任务可能仍未指派）
+与 `review.ts` 的驳回重试（`reopen` 会清空 owner，回到 pending）——前者改为条件措辞
+（"若仍无主则 claim，否则直接完成"）。
+
+**验证**：`packages/cluster` **110 个测试通过**；`tsc -b tsconfig.host.json` EXIT=0；
+E2E 断言 29 次调用全绿。**这是本项目第一次"跑出来"而不是"读出来"的缺陷**。
+
+**遗留缺口（诚实记录）**：E2E 三件套目前在 `.dev/`（被 gitignore），因此**不可从仓库复现**；
+且只驱动了 `motion` 一条链，`broadcast_message` 与 `roundtable` 尚未被 E2E 跑过
+（三者共用 `broadcastTargets` 与 `attempt`，但各自的 execute 仍需实跑）。
+
 ---
 
 ## 12. 下一步（按优先级）
