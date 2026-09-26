@@ -716,9 +716,18 @@ API 区段标记）、在 `LINK_MAP` 与 `SERVICE_PAGE` 登记、加进 `docs/su
 生成配对记录，再让 `verify-cordis-catalog` 与 `verify-type-equiv` 转绿。
 顺带产出本项目**第一份真正的子系统文档页**（此前只有包 README）。
 
-**尚未探完**：`gen-cordis-api` / `gen-doc-graphs` / `gen-dependency-catalog` / `verify-export-jsdoc`
-四项的探测被审批打断，尚未确认是否同样受影响——下一轮**开工前先跑一遍**，
-避免又出现"代码写完才发现门禁"。
+**八项门禁探完，全景如下**：
+
+| 门禁 | 结果 |
+|---|---|
+| `verify-tool-catalog` / `verify-dependency-catalog` / `verify-export-jsdoc` | ✅ |
+| `verify-config-catalog` | ✅（本次修复） |
+| `verify-cordis-catalog` / `verify-cordis-api` / `verify-doc-graphs` | ❌ **同一个根因** |
+
+关键发现：`gen-cordis-api` 与 `gen-doc-graphs` **都复用** `projectCordisCatalog`，
+因此三者报的是**同一批**三个类型违规（`cordis-catalog` 额外多一条 SERVICE_PAGE）。
+这一刀的收益因此被放大：**一份 `cluster.md` 子系统页 + `LINK_MAP` + `SERVICE_PAGE`
+可一次性让三个红门禁同时转绿**。
 
 ---
 
