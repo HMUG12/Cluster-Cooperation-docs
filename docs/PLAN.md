@@ -1135,6 +1135,32 @@ M4 的形态在调查后确定：**斜杠命令**，而不是 `dsh` 子命令。
 **验证**：新包 **10 个测试通过**；`tsc -b tsconfig.host.json` EXIT=0；oxlint 0 warning 0 error；
 双语 README **109:109** 对齐；配对 **1013 对**一致；模型体验门禁 **296 个 README** 全通过（`explained none` 103）。
 
+## 11.23 M4 第二刀（测试）：`/cluster` 接线测试，以及一处必须停下来的既有缺陷
+
+新包此前只有纯渲染器被测，**注册与分派路径从未执行**——正是协议工具上反复出现的同一缺口。
+补 `tests/command.spec.ts`：挂真实 `CommandRuntime`，用一个只提供 `listMembers/listTasks` 的 Team 服务替身，
+经注册表执行 `/cluster`，断言（1）loader 看到的注册形状、（2）每条子命令各自抵达自己的报告、
+（3）未知子命令用 usage 拒绝、（4）Team 的拒绝变成 **error 结果**而不是抛穿 dispatch。
+
+**验证**：包内 **15 个测试通过**；`packages/cluster` **141 个测试通过**。
+
+### 但这次多跑的一项门禁，报出了 19 条既有违规
+
+为了改 devDeps，我这次多跑了一项此前**从未跑过**的门禁：`check-workspace-constraints`。
+它一口气报出 **19 条违规**，全部属于 cluster 包族：
+
+1. **发布成员形状**（bundle / config / orchestrator / router）：`private: true` 不该设、缺 `publishConfig.access`、
+   `repository.url` 与 `files` 不符合本仓库的发布约定。
+2. **非实验包不得依赖实验包**：bundle（2 条）、orchestrator、router，以及**本次新增的 `command-cluster`**。
+
+也就是说：**这 4 个包从建立那天起就没有符合工作区约束**，而历次门禁清单里**恰好都没有这一项**——
+与 §11.22 的 `gen-tsconfig-paths` 属同一类盲区（**清单不完整**，而不是运气）。
+新包沿用了同样的形状，因此带上了同一个问题。
+
+**处置**：不再往违规上叠代码。下一刀先**把 cluster 包族对齐工作区约束**：
+逐个修正 package.json 的发布形状，并解决"实验依赖"那一条
+（先确认 `experimental-package-policy` 的判定依据，再决定是改名、登记，还是改依赖类型）。
+
 ---
 
 ## 12. 下一步（按优先级）
