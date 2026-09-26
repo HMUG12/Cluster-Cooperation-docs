@@ -742,24 +742,58 @@ subsystems 页（`SERVICE_PAGE`），生成器再把 API 区段注入该页；�
 这一刀的收益因此被放大：**一份 `cluster.md` 子系统页 + `LINK_MAP` + `SERVICE_PAGE`
 可一次性让三个红门禁同时转绿**。
 
+## 11.13 M3 第一期：`broadcast_message`（已完成并真机验证）
+
+设计结论（§11.10）指向广播：它只需已有的"Lead → 多成员"合法边，不需要新的任务板状态，
+而且它是圆桌/辩论/投票的共同基础设施。**落点我自己拍了：放进 `cluster-orchestrator`。**
+
+为什么不新建 `tool-*` 包：两笔真实成本——一次完整 `pnpm install`（本会话实测 15 分 32 秒），
+**加**改上游的目录收割器（`gen-tool-catalog.ts` 有 78 个显式 import、伪造附件存储/工作流引擎/
+subagent provider，还要为"从不全局注册的工具"mint Agent 作用域）。两种落点的工具行为完全一致，
+所以先出功能；"提升为 `tool-*` 包以进入工具目录"记为待办，并写进了 README 的 Known Limitations。
+
+| 文件 | 改动 |
+|---|---|
+| `cluster/orchestrator/src/broadcast.ts` | **新增纯模块**：`broadcastTargets(requested, members)` |
+| `cluster/orchestrator/src/index.ts` | 只在"调用者是 Lead 且组合挂载了工具运行时"时注册该工具 |
+| `package.json` | 新增 `@deepseek-ai/dsh-tools` peer/dev 依赖 |
+
+四个决定：
+
+1. **不把 `tools` 写进 `inject`**，沿用本文件已有的"结构化可选服务"模式（`ctx.get('tools')`）。
+   board 策略只需要 `agents` + `agentTeams`；让一个编排插件因为它附带的一个工具而提高加载门槛，
+   会破坏那些刻意不挂载工具运行时的组合。
+2. **省略 `targets` 即面向全队**；点名时逐个规范化（去空白、去重）并校验。
+3. **拒绝必须带理由**（名字不存在 / 就是 Lead 自己 / 派生已失败），而不是静默丢弃——
+   "以为已经通知了 5 个人"是不能接受的错误。写测试时我发现自己断言错了：默认广播时
+   failed 成员**应当**出现在 `skipped` 里，实现是对的、测试是错的。
+4. **串行投递**，因此返回顺序等于调用方点名的顺序，单点拒绝不会中断其余投递。
+
+**真机验证（不只跑单测）**：用脚本化模拟网关跑 headless 集群，并从网关记录的请求体里确认——
+Lead 的 26 个工具里 `broadcast_message` 排第一，而 teammate 的 29 个工具里**没有**它
+（"只给 Lead 注册"的隔离性成立）。整条链路（config → router → orchestrator）依然正常：
+teammate 被路由到 `tester-model` 并正常收尾。
+
+**验证**：`packages/cluster` **65 个测试通过**（新增 10 个广播），`tsc -b tsconfig.host.json` EXIT=0，
+门禁全绿（配对 1013 / 模型体验 / 链接 / 折行 / config-catalog / tool-catalog / export-jsdoc）。
+
+**连带教训（第三次遇到）**：`package.json` 的 `description` 与源码行号都会进生成物
+`docs/config-catalog.md`——生成物一变，中文侧与配对记录就要同步。这次是照着 §11.12 的教训做的。
+另外记一条工具用法：**`pnpm install --lockfile-only` 是更新锁文件的正确姿势**——44 秒、不链接依赖、
+不跑 postinstall，因此完全绕开那个 lefthook 死结（对比完整 install 的 15 分钟）。
+
 ---
 
 ## 12. 下一步（按优先级）
 
 1. **M2 编排收尾**：只剩轮次调度与上下文压缩策略。结构化 briefing、依赖自动解锁、评审回路、
    用量记账与预算执行都已完成并验证。
-2. **M3 第一期：广播**。设计结论（§11.10）指向它：只需已存在的"Lead → 多成员"合法边，
-   不需要新任务板状态，且是圆桌/辩论/投票的共同基础设施。**但落点必须先定**：
-   `scripts/gen-tool-catalog.ts` 的注释写着"manifest 对每个 on-disk `tool-*` 包做校验"，
-   而且它**逐包显式 import** 每个工具插件来启动收集 schema。于是两条路：
-   (a) 挂在 `cluster-orchestrator` 内（`agent.ctx.tools.register`，范式见
-       `tool-agent-team/src/index.ts:216`）——改动最小，但新工具会**绕过工具目录体系**，
-       与上游惯例不符；
-   (b) 新建 `packages/cluster/tool-cluster/`（`tool-*` 命名才会被目录校验覆盖）——符合惯例，
-       但必须同时改 `gen-tool-catalog.ts` 的 import 清单与启动接线、重新生成
-       `docs/tool-catalog.md`，并过 `verify-tool-catalog` 门禁。
-   前一条路验证成本低但留下结构债，后一条路要先读懂目录生成器再动手。**新建包现在可行**：
-   `CI=true pnpm install` 已验证 EXIT=0（见 §11.10 的环境说明）。
+2. **M3 第二期：圆桌/辩论/投票**。广播已落地（§11.13），它是这三种协议的公共基础设施。
+   但**先设计再动手**：真正的阻塞点仍然是状态表达——任务板只能表达"行 + 状态"，
+   而"票数"必须有新的表达方式（§11.10 的结论：把轮次显式化，或把每票落成一行）。
+   上一轮多人评审撞的正是这堵墙，不要重蹈。
+   另外三项待办：把 `broadcast_message` 提升为 `tool-*` 包以进入工具目录；
+   确认 `topology` / `maxConcurrency` 是否要有真实消费者；轮次调度与上下文压缩策略。
 3. **M4 可观测**：`dsh cluster status/tasks/agents/graph/cost` 命令族。用量记账（§11.7）已经把
    `cost` 需要的数据折好了，CLI 层可以直接读；再复用上游 `client-ui-agent-team` 扩展 Web 集群面板。
 4. **纪律性提醒**：本项目反复出现的模式是"配置先声明、消费者后补"——`tokenBudget`、
