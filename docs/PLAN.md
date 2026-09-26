@@ -1048,6 +1048,65 @@ broadcast 首跑即失败，原因在我自己：断言里找的是未转义的 
 **M3 到这里的真实状态**：三种对话协议（广播 / 圆桌 / 投票）**都已实现、有单元测试、并各自被真实 CLI 跑通**。
 仍未做的只剩**辩论**——唯一需要新任务板状态的协议（回合顺序），以及把"三条链"写进 CI 的常规门禁说明。
 
+## 11.21 M3 第四刀：辩论（已完成）
+
+M3 的四种对话协议到这里齐了。辩论正是我在 §11.14 判定"可能需要先扩状态"的那一个——
+这一轮的**设计结论是：不需要新状态**。
+
+### 设计：轮次就是阻塞列表
+
+`task-graph.ts` 对任务图的拒绝只有三种：`missing | duplicate | cycle`。
+于是"第 r 轮的每个发言被第 r-1 轮的**全部**发言阻塞"既合法又充分：
+
+- **开门**由就绪判定负责——上一轮全部完成后，下一轮的发言才 ready；
+- **指派**由 `handoff` 负责——每个发言用 `cluster-owner:` 声明辩手，放行那一刻被指派并唤醒；
+- **开场轮**创建即 ready，因此由工具自己指派并投递 `[DEBATE]` 通知（与圆桌的答卷同形）；
+- **裁决**被终轮阻塞，"最后一位辩手说完"就是它的放行事实，而通知里携带**终轮有多少论证可读**
+  （`debateSummary`，与 tally 携带计数同形）。
+
+也就是说：**辩论 = 分层屏障**，完全落在 M2 已有的两个机制上，没有一行新的任务板状态。
+
+### 落地
+
+| 文件 | 改动 |
+|---|---|
+| `cluster/orchestrator/src/debate.ts` | **新增纯模块**：`debatePlan` / `readStatements` / `debateSummary` / 轮次语汇与三种文本 |
+| `cluster/orchestrator/src/index.ts` | 注册 `debate` 工具；交接分支识别裁决并携带读数 |
+| `cluster/orchestrator/src/handoff.ts` | 参数 `tally` → `carried`（现在也承载裁决读数） |
+
+**准入规则**（全在纯层，全有测试）：少于 2 轮拒绝（"一轮作答是圆桌，不是辩论"）；
+超过 5 轮、或发言总数超过 32 拒绝——**提前**拒绝，避免建到一半才撞 `maxTasks` 而留下半截任务板；
+裁判先于辩手校验（与圆桌先校验收集者同理：唤不醒收集者的扇出会白花所有人的回合）；
+**点名裁判当辩手则拒绝并说明**（"辩论需要一位没有参辩的裁判"）——这是辩论与圆桌唯一的语义差别；
+默认名单是"除裁判外的全体"。
+
+**验证**：`packages/cluster` **126 个测试通过**（新增 16 个）；`tsc -b tsconfig.host.json` EXIT=0；
+oxlint 0 warning 0 error；**15 项门禁全 0**（含重记录的双语配对 203:203，
+以及因 `Config` 接口行号位移而重新生成的 `docs/config-catalog.md`）。
+
+### 辩论的 E2E（同日补上）
+
+`apps/cli/tests/cluster-debate.e2e.ts` + `fixtures/cluster-debate-llm.mjs`：**1 passed，17 秒**。
+它断言的核心是**分层屏障**，板上证据长这样：
+
+```
+task-1 Debate 1/2 [completed] blockedBy=[]
+task-2 Debate 1/2 [completed] blockedBy=[]
+task-3 Debate 2/2 [in_progress] blockedBy=["task-1","task-2"]
+task-4 Debate 2/2 [in_progress] blockedBy=["task-1","task-2"]
+task-5 Verdict:   [pending]    blockedBy=["task-3","task-4"]
+```
+
+即"第二轮被第一轮的**两个**发言共同阻塞、裁决被第二轮两个发言阻塞"，
+且第二轮是**在第一轮全部完成之后**才被开门与指派的——这正是分层屏障要证明的东西。
+
+**首跑暴露的是我 fixture 的缺陷（产品是对的）**：我用**整段对话**判断"是否已 `team_task_get`"，
+于是辩手第二轮跳过 get，拿第一轮的陈旧 revision 去 edit/complete → 必然抛
+`TEAM_TASK_STALE_REVISION` → 发言永远完不成。这正是"给 Lead 读板循环加界"换来的好处：
+**17 秒就定位，而不是挂到 90 秒被杀、报错里什么都没有**。
+
+**仍未做**：把四个工具提升为 `tool-*` 包以进入工具目录。
+
 ---
 
 ## 12. 下一步（按优先级）
