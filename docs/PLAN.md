@@ -1161,6 +1161,35 @@ M4 的形态在调查后确定：**斜杠命令**，而不是 `dsh` 子命令。
 逐个修正 package.json 的发布形状，并解决"实验依赖"那一条
 （先确认 `experimental-package-policy` 的判定依据，再决定是改名、登记，还是改依赖类型）。
 
+## 11.24 工作区约束：先修好能立刻修对的那一半（已完成）
+
+上一刀记录了 `check-workspace-constraints` 的 19 条违规。这一刀把**发布成员形状**的 14 条修掉：
+4 份 manifest（bundle / config / orchestrator / router）去掉 `private: true`、补上
+`publishConfig.access: public` 与规范 `repository`（含 `directory`）、并把 `files` 收敛为
+`["lib/index.js","lib/types/**/*.d.ts"]`（bundle 保留 `cordis.patch.yml`，与既有 bundle 一致）；
+字段顺序也改为仓库的规范顺序。
+
+复核：**14 条形状违规全部消失**，剩 **5 条**，全部同一类：
+
+```
+@deepseek-ai/dsh-cluster-bundle:       dependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-cluster-bundle:       dependencies.@deepseek-ai/dsh-experimental-tool-agent-team
+@deepseek-ai/dsh-command-cluster:      peerDependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-cluster-orchestrator: peerDependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-cluster-router:       peerDependencies.@deepseek-ai/dsh-experimental-agent-team
+```
+
+### 这 5 条不能用"改依赖类型"糊过去
+
+读完规则代码，结论是硬的：`checkExperimentalDependencyIsolation` 的豁免**只给根包 `@deepseek-ai/dsh`**，
+且只限它 `dependencies` 中出现在 `OPTIONAL_BUNDLES` 的名字；**标准发布成员在运行时依赖段一律不得引用实验包**。
+而 cluster 包族天生建立在那套实验的 Agent Team 之上（既用它的类型，也用它的运行时导出），
+因此唯一结构上正确的解法是：**把这个包族移入 `packages/experimental/` 并按 `@deepseek-ai/dsh-experimental-*` 更名**。
+
+这是一次覆盖较广的机械改名（包名与目录、彼此 import、bundle 补丁、`apps/cli` 依赖、E2E 的补丁路径、
+双语 README 标题、`command-cluster` 在 Model Experience 白名单里的键、tsconfig 引用与路径生成），
+因此**留作下一刀**，并且要先定名字（例如 `dsh-experimental-cluster-orchestrator`）。
+
 ---
 
 ## 12. 下一步（按优先级）
