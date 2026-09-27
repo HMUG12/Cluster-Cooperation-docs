@@ -275,10 +275,10 @@ clusters:
 | 位置 | 内容 |
 |---|---|
 | `packages/cluster/config` | `ctx.clusterConfig` 服务：`cluster.yml` 严格校验（未知键/未知别名/错误类型一次性全部报出）、别名与内联路由、`routeFor` / `fallbacksFor` / `member` / `defaultClusterName` |
-| `packages/cluster/router` | `cluster-router` 插件：`agent/created` + `ctx.agentTeams.tryMembership` + `installModelSelection(agent.ctx, ref)`，随 `agent/disposed` 与插件 effect 释放 |
-| `packages/cluster/bundle` | profile 层：禁用 4 个 legacy subagent 工具行，插入 agent-team / tool-agent-team / cluster-config / cluster-router |
+| `packages/experimental/cluster-router` | `cluster-router` 插件：`agent/created` + `ctx.agentTeams.tryMembership` + `installModelSelection(agent.ctx, ref)`，随 `agent/disposed` 与插件 effect 释放 |
+| `packages/experimental/cluster-bundle` | profile 层：禁用 4 个 legacy subagent 工具行，插入 agent-team / tool-agent-team / cluster-config / cluster-router |
 | `packages/cluster/cluster.example.yml` | 可跑通并被测试当作 fixture 的示例文档 |
-| `packages/boot/app-boot/src/profile.ts` | 把 `@deepseek-ai/dsh-cluster-bundle` 加入 `OPTIONAL_BUNDLES`（Web 插件页可见） |
+| `packages/boot/app-boot/src/profile.ts` | 把 `@deepseek-ai/dsh-experimental-cluster-bundle` 加入 `OPTIONAL_BUNDLES`（Web 插件页可见） |
 | 门禁改动 | `tsconfig.base.json` 加 3 条 paths、`tsconfig.host.json` 加 3 条 references |
 
 测试：`packages/cluster` 共 **10 个测试全部通过**；`pnpm run build` EXIT=0。
@@ -314,7 +314,7 @@ clusters:
 | `packages/experimental/agent-team/src/types.ts` | `SpawnTeammateRequest.agentOptions?: TeamSpawnRoute`；新增 `TeamSpawnRoute`（provider / model / reasoningEffort / maxTokens） |
 | `packages/experimental/agent-team/src/roster.ts` | 把 `request.agentOptions` 透传给 `ctx.subagents.startContinuable(...)`（Host 侧做一次品牌收敛） |
 | `packages/experimental/tool-agent-team/src/index.ts` | `spawn_teammate` 执行时按 member 名从 `ctx.get('clusterConfig')` 解析路由并作为 `agentOptions` 传入（**结构性查找，不引入包依赖**；服务缺失时静默回退到继承 Lead 路由） |
-| `packages/boot/app-boot/src/profile.ts` | 把 `@deepseek-ai/dsh-cluster-bundle` 加入 `OPTIONAL_BUNDLES` |
+| `packages/boot/app-boot/src/profile.ts` | 把 `@deepseek-ai/dsh-experimental-cluster-bundle` 加入 `OPTIONAL_BUNDLES` |
 
 设计要点：**路由在"创建时"就确定**，不依赖事件时序，也不依赖模型自觉传参——`cluster.yml` 里
 `members[].route` 是唯一真源。Lead 自身仍由 `cluster-router` 在 `agent/created` 时绑定
@@ -440,7 +440,7 @@ IDE 进程环境在启动时冻结，新开 shell 看不到 `node`。`PATH` 已�
 上游原文承认这个缺口：**"Task readiness never starts an owner."** —— 任务板会算出 `ready`，
 但没有任何事件告诉 owner 可以开工了，只能等它自己重新 `team_task_list`。
 
-新增包 `packages/cluster/orchestrator`（`@deepseek-ai/dsh-cluster-orchestrator`）：
+新增包 `packages/experimental/cluster-orchestrator`（`@deepseek-ai/dsh-experimental-cluster-orchestrator`）：
 
 | 文件 | 职责 |
 |---|---|
@@ -995,7 +995,7 @@ E2E 断言 29 次调用全绿。**这是本项目第一次"跑出来"而不是"�
 1. **不新建位置，沿用仓库范式**。E2E 放 `apps/cli/tests/*.e2e.ts`（由 `vitest.e2e.config.ts` 收集），
    模型替换沿用 `profiles/headless/tests/fixtures/*.mjs` 的 fixture 适配器约定（对照 `team-llm.mjs`）：
    **靠 teammate 身份提醒区分角色，靠对话内容选择下一步**。
-2. **不改 `apps/cli` 的依赖清单**。profile 无法按包名解析 `@deepseek-ai/dsh-cluster-bundle`
+2. **不改 `apps/cli` 的依赖清单**。profile 无法按包名解析 `@deepseek-ai/dsh-experimental-cluster-bundle`
    （bundle 先按 dsh 安装锚点解析，而该包不是本 app 的依赖）。我没有加依赖、也没有复制补丁，
    而是**直接 `--patch` 引用 cluster bundle 自己的 `cordis.patch.yml`**：补丁里的插件名从补丁自身位置解析，
    于是 **bundle 仍是"集群挂载了什么"的唯一事实来源**。
@@ -1113,7 +1113,7 @@ M4 的形态在调查后确定：**斜杠命令**，而不是 `dsh` 子命令。
 而 `/cluster` 恰好运行在同一个会话里、能直接读 `agentTeams`；`dsh cluster status` 反而要先定位会话。
 仓库里的 `/goal`、`/feedback`、`/compact` 也都是这个形态，`packages/<域>/command-*/` 是既有公约。
 
-新增 `packages/cluster/command-cluster`，四条只读子命令：
+新增 `packages/experimental/cluster-command`，四条只读子命令：
 
 | 子命令 | 输出 |
 |---|---|
@@ -1172,11 +1172,11 @@ M4 的形态在调查后确定：**斜杠命令**，而不是 `dsh` 子命令。
 复核：**14 条形状违规全部消失**，剩 **5 条**，全部同一类：
 
 ```
-@deepseek-ai/dsh-cluster-bundle:       dependencies.@deepseek-ai/dsh-experimental-agent-team
-@deepseek-ai/dsh-cluster-bundle:       dependencies.@deepseek-ai/dsh-experimental-tool-agent-team
-@deepseek-ai/dsh-command-cluster:      peerDependencies.@deepseek-ai/dsh-experimental-agent-team
-@deepseek-ai/dsh-cluster-orchestrator: peerDependencies.@deepseek-ai/dsh-experimental-agent-team
-@deepseek-ai/dsh-cluster-router:       peerDependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-experimental-cluster-bundle:       dependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-experimental-cluster-bundle:       dependencies.@deepseek-ai/dsh-experimental-tool-agent-team
+@deepseek-ai/dsh-experimental-cluster-command:      peerDependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-experimental-cluster-orchestrator: peerDependencies.@deepseek-ai/dsh-experimental-agent-team
+@deepseek-ai/dsh-experimental-cluster-router:       peerDependencies.@deepseek-ai/dsh-experimental-agent-team
 ```
 
 ### 这 5 条不能用"改依赖类型"糊过去
@@ -1214,6 +1214,74 @@ M4 的只读面补齐了最后一条：**花费**。难点不在渲染，而在*
 oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
 
 **仍未做**：包族改名（§11.24 剩下的 5 条实验依赖违规）；`tool-*` 提升；Web 面板。
+
+## 11.26 M4 第四刀：包族迁入实验区并改名（已完成）
+
+§11.24 留下的 5 条违规——"发布成员不得在 dependencies/peerDependencies 里引用实验包"——
+不是笔误，而是**位置错了**：router / orchestrator / bundle / command-cluster 四个包的公开契约
+依赖 `@deepseek-ai/dsh-experimental-agent-team`，所以它们**本身就是实验包**；
+而 `config` 只依赖发布包，按 `packages/experimental/AGENTS.md`（"只有当完整公开契约是实验性的或仅内部使用时才属于这里"）
+**不该**搬进来。因此这一刀是**搬家 + 改名**，不是改行为：
+
+| 旧 | 新 |
+|---|---|
+| `packages/cluster/router` `@deepseek-ai/dsh-cluster-router` | `packages/experimental/cluster-router` `@deepseek-ai/dsh-experimental-cluster-router` |
+| `packages/cluster/orchestrator` `…-orchestrator` | `packages/experimental/cluster-orchestrator` `@deepseek-ai/dsh-experimental-cluster-orchestrator` |
+| `packages/cluster/bundle` `…-bundle` | `packages/experimental/cluster-bundle` `@deepseek-ai/dsh-experimental-cluster-bundle` |
+| `packages/cluster/command-cluster` `@deepseek-ai/dsh-command-cluster` | `packages/experimental/cluster-command` `@deepseek-ai/dsh-experimental-cluster-command` |
+| `packages/cluster/config` `…-config` | **不动**（它本来就是合法的发布成员） |
+
+### 搬迁暴露的四类真实耦合（都是读代码看不出、跑门禁才现形的）
+
+1. **`apps/cli` 不得 runtime 依赖实验包** —— 命令包必须降为 `devDependencies`
+   （规则明确允许测试经 devDependency 使用实验包），而 **bundle 反而必须留在 `dependencies`**：
+   它被 `OPTIONAL_BUNDLES` 点名，规则要求"可选 bundle 必须是 apps/cli 的 runtime 依赖"
+   （出厂但默认关闭，见 `.agents/notes/.../2026-09-15-shipped-optional-bundles.md`）。
+   两条方向相反的要求，取决于包是否在那份名单里——我起初只推对了前者，另一半是实测纠正的。
+2. **包内相对引用** —— `cluster-router/tsconfig.json` 的 `{ "path": "../config" }` 搬家后解析到
+   `packages/experimental/config`（不存在）。这是全仓唯一一处此类引用，只有生成器会暴露它。
+3. **tsconfig 别名必须手写** —— `gen-tsconfig-paths` 的判定是"包名恰为 `@deepseek-ai/dsh-<目录名>`"，
+   实验包名不满足，因此四个包都必须写进生成区**之外**的手写块；命令包那一条原本落在生成区内，
+   会被生成器直接丢弃（这正是 `collectPackageAliases` 与 `handWrittenSpecifiers` 的分工）。
+4. **组级 README 缺失**（**既有缺陷，与本次搬迁无关**）—— `verify-subsystem-pages` 要求每个包组
+   都有 `packages/<group>/README.md` 并直链一条 `docs/subsystems/*.md`；`packages/cluster` 一直没有。
+   本轮补上 `README.md` / `README.zh.md`（含配对记录），并写清组内现状（为什么只剩 `config`）。
+
+### 验证（按最终状态如实记录）
+
+- `packages/cluster` + `packages/experimental/cluster-*` **148 个测试通过**（12 个文件）
+- `tsc -b tsconfig.host.json` EXIT=0
+- `constraints` **归零**（5 条违规全消）、`verify-subsystem-pages` ✓（既有缺口已补）、
+  `verify-md-links` ✓、`verify-md-wrap` ✓、`verify-package-invariants` ✓（补上"未发布伴随包"理由句）、
+  `verify-default-product-isolation` ✓、`verify-application-entrypoints` ✓、六个生成器 `--check` 全绿
+- 旧名/旧路径残留检索 **0 处**
+
+**文档侧的对齐（本轮内已解决）**
+
+英文生成页重排后，三页的中文侧一度失配 ✗（`config-catalog` / `capability-seams` / `event-producer-consumer`）。
+根因是同一条**包短名约定**：`gen-doc-graphs` 把包的短名定义为 `<组>-<目录>` ✗
+（迁移前 `cluster` + `router` = `cluster-router` ✓），迁移后必须同步改为 `experimental-cluster-router` ✗——
+否则生成表会**静默丢链接** ✗（英文侧那一格渲染成纯文本，而中文侧还留着旧链接 ✗）。
+改对之后，中文侧再按英文侧对齐**段落顺序 / 代码块 / 链接顺序**三类（各有门禁分别管 ✗），配对即全绿 ✓。
+
+教训记一条：中文生成页不是"翻译一遍就完了" ✗。英文侧的顺序与代码块变化都要镜像过去 ✗，
+而**这次是三个不同门禁分别发现它们的**（代码块 ✗、链接目标 ✗、链接顺序 ✗）。
+
+**仍然失败的项（均与本次改动无关，已逐条定位）**
+
+- `verify-cordis-config` ✗：`apps/cli/tests/profiles/acp/cordis.yml: root must be a Loader entry array`
+  ✗ —— 该文件不在本轮 diff 内。
+- `verify-built-package-invariants` / `verify-node-next-types` ✗：在本机崩溃于 IDE 的 safe-delete shim
+  ✗（环境限制，报错为 `spawnSync node ETIMEDOUT` ✗）。
+- `docs:build` / `doc-typecheck` ✗：依赖完整 `build:lib:host`（含 tsdown ✗），本轮未在本机复验 ✗。
+
+### 也如实记两件事
+
+- 我此前几次宣称的"门禁全绿"，用的是**我自己列的清单**而不是仓库权威清单
+  （`run-gates.ts` 的 `hygiene` / `doc-sync`）。按权威清单跑才发现 `verify-subsystem-pages`
+  **本来就是失败的**（上面第 4 条）——这是我更早就该做的事。
+- 本轮 `pnpm install` 在本机退出 1：根 `postinstall`（lefthook 安装器）被本机的安全删除护栏与残留锁挡住，
+  属**环境限制**而非仓库问题；lockfile 本体已按新依赖正确更新。
 
 ---
 
