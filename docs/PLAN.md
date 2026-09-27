@@ -1190,6 +1190,31 @@ M4 的形态在调查后确定：**斜杠命令**，而不是 `dsh` 子命令。
 双语 README 标题、`command-cluster` 在 Model Experience 白名单里的键、tsconfig 引用与路径生成），
 因此**留作下一刀**，并且要先定名字（例如 `dsh-experimental-cluster-orchestrator`）。
 
+## 11.25 M4 第三刀：`/cluster cost`（已完成）
+
+M4 的只读面补齐了最后一条：**花费**。难点不在渲染，而在**数据归属**——用量折叠只存在于编排器内部
+（只有它订阅了每个会话的事件流），而命令**不能**直接 import 它：
+命令包若依赖 `@deepseek-ai/dsh-experimental-agent-team` 或编排器，就会撞上 §11.24 那 5 条实验依赖违规
+（包族改名尚未做）。所以采用了**发布只读视图**：
+
+- 编排器 `ctx.provide('clusterSpend', { members() })`——把折叠结果发布成一个只读视图，
+  行内已完成 session→成员名、成员→声明预算的解析；
+- 命令侧**结构化读取**（自持一个最小接口，与它读 `clusterConfig` 的方式一致），
+  **不新增任何跨包依赖**；没有编排器时如实回答"没人折叠花费"，而不是打印一个零。
+
+**纯层**新增 `spendReport(rows)`：按花费降序、同名再按名字排序（**两次读取打印同样的行**，
+可脱离 fold 顺序断言）；无声明预算时 `overBudget` 恒为 false（没有可超的对象）。
+
+**测试**：`spend.spec` 新增 3 例（路由/预算/排序），命令侧新增 3 例
+（渲染、`/cluster cost` 分派读到发布的视图、无编排器时的措辞）。`cost` 从"非法子命令"变为合法，
+因此同步更新了拒绝用例与 usage 行。
+
+**验证**：`packages/cluster` **148 个测试通过**（12 个文件）；`tsc -b tsconfig.host.json` EXIT=0；
+**16 项门禁全 0**（含重新生成的 `docs/config-catalog.md`——我扩展了 import 块，`Config` 接口行号位移）；
+oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
+
+**仍未做**：包族改名（§11.24 剩下的 5 条实验依赖违规）；`tool-*` 提升；Web 面板。
+
 ---
 
 ## 12. 下一步（按优先级）
