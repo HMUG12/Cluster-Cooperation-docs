@@ -1259,9 +1259,9 @@ oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
 **文档侧的对齐（本轮内已解决）**
 
 英文生成页重排后，三页的中文侧一度失配 ✗（`config-catalog` / `capability-seams` / `event-producer-consumer`）。
-根因是同一条**包短名约定**：`gen-doc-graphs` 把包的短名定义为 `<组>-<目录>` ✗
-（迁移前 `cluster` + `router` = `cluster-router` ✓），迁移后必须同步改为 `experimental-cluster-router` ✗——
-否则生成表会**静默丢链接** ✗（英文侧那一格渲染成纯文本，而中文侧还留着旧链接 ✗）。
+根因是同一条**包短名约定**：`gen-doc-graphs` 的短名是**npm 名去掉 `@deepseek-ai/dsh-`** ✗
+（迁移前 `@deepseek-ai/dsh-cluster-router` → `cluster-router` ✓），迁移后自动变成 `experimental-cluster-router` ✗，
+表里必须同步改 ✗——否则生成表会**静默丢链接** ✗（英文侧那一格渲染成纯文本，而中文侧还留着旧链接 ✗）。
 改对之后，中文侧再按英文侧对齐**段落顺序 / 代码块 / 链接顺序**三类（各有门禁分别管 ✗），配对即全绿 ✓。
 
 教训记一条：中文生成页不是"翻译一遍就完了" ✗。英文侧的顺序与代码块变化都要镜像过去 ✗，
@@ -1282,6 +1282,43 @@ oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
   **本来就是失败的**（上面第 4 条）——这是我更早就该做的事。
 - 本轮 `pnpm install` 在本机退出 1：根 `postinstall`（lefthook 安装器）被本机的安全删除护栏与残留锁挡住，
   属**环境限制**而非仓库问题；lockfile 本体已按新依赖正确更新。
+
+## 11.27 M4 复检：同类根因的审计，与第一处守卫（已完成）
+
+上一轮我承诺"先审计同类假设，再往下走"✓。穷尽式审计的结果：
+
+- 全仓"包名 ⇄ 目录/短名"的推导点约 19 处 ✗，其中**会静默退化的只有一处** ✗：
+  `gen-doc-graphs.ts` 的 `SERVICE_ROLES` 表 ✓ —— 短名未命中时 `pkgLink` 回退成纯文本 ✗（无链接、无报错 ✗），
+  而完备性守卫 `assertServiceRolesComplete` **只校验服务名、不校验包短名** ✗。
+- 其余全部**安全**：要么抛错 ✓，要么两侧同源 ✓。`apps/web/vite.config.ts` 的 vendor 分块白名单属"名称字面量失配" ✗，
+  但它只影响分块、不影响正确性 ✗，且其中已无 cluster 引用 ✓。
+- **短名的真实定义**（`package-graph.ts:50`）= npm 名去掉 `@deepseek-ai/dsh-` ✗
+  —— 这也**纠正了 §11.26 里我写错的措辞** ✗（不是 `<组>-<目录>` ✗）。
+- 附带发现：仓库有 **8 套各自为政的工作区枚举器** ✗ 与 **2 份前缀常量** ✗（暂不合并 ✗，先立守卫 ✓）。
+
+### 做了什么
+
+`gen-doc-graphs.ts` 新增导出 `assertServiceRolePackagesExist(pkgs, roles)` ✓：
+把 `SERVICE_ROLES` 里 **`pkg` / `implementations` / `consumers` / `companions`** 的每个短名与包图比对 ✗，
+未知名**抛错**并列出"短名（引用它的角色）" ✗。三例单元测试（合法名、迁移前的旧名、多个角色引用同一缺失名 ✗）。
+
+### 守卫立起来就立刻抓到两处**既有断链**
+
+首次运行即失败 ✓，报出两个表里写着、仓库里不存在的短名 ✗：
+
+| 表里写的 ✗ | 真实包 ✓ | 正确短名 ✓ |
+|---|---|---|
+| `ui-settings-plugin-inventory` | `@deepseek-ai/dsh-client-ui-settings-plugin-inventory` | `client-ui-settings-plugin-inventory` |
+| `inspector` | `@deepseek-ai/dsh-experimental-inspector` | `experimental-inspector` |
+
+也就是说，**能力接缝页上这两个包一直是纯文本、没有链接** ✗，而且**重新生成会"同意"这个错误** ✗
+（生成器与已提交产物一致 ✓）。这类"生成器与产物一致地错" ✗，靠比对产物永远发现不了 ✗，
+只有**对生成器的输入做完备性校验**才行 ✓——这正是守卫的价值 ✓。
+
+修好后英文页多出两条真链接 ✓，中文侧同步（代码块 + 两处单元格 linkify ✓），配对全绿 ✓。
+
+**验证**：`gen-doc-graphs` 与 `--check` 均 0 ✓；`gen-doc-graphs.spec` 0 ✓（新增 3 例 ✓）；
+`tsc -b tsconfig.host.json` EXIT=0 ✓；`verify-translation-pairing` 0 ✓。
 
 ---
 
