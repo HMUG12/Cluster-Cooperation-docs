@@ -1362,6 +1362,52 @@ oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
 **顺带纠正**：§11.26 里我把 `gen-doc-graphs` 的短名写成"`<组>-<目录>`" ✗，实际是
 **npm 名去掉 `@deepseek-ai/dsh-`** ✗（已在该节改写 ✓）。
 
+## 11.29 M4 第六刀：Web 面板的宿主半（`cluster-web`，部分完成）
+
+方案里 `cluster/web` 写的是"**扩展** `client-ui-agent-team`" ✓。我做成了**兄弟包**：一个只读的
+`TypertRemoteService`，因为集群自己的两个面恰好是上游面板**没有数据来源**的那两个——**声明的集群名**与**折算花费** ✓，
+而新增一个只读服务不必改动上游契约 ✓。
+
+### 被架构**逼出来**的设计
+
+客户端 bundle **不得跨插件做值导入** ✗（`client-bundle-purity` 在构建期硬拦 ✓）✗，
+因此"面板该渲染什么"必须由**宿主**算好 ✓：这一个 Remote 方法返回的载荷是**可直接展示**的
+（已排序 ✓、已计数 ✓），面板只负责排版 ✓✓。这正是宿主侧已有的分层（纯派生 + 薄适配 ✓）。
+
+### 一个实验性**宿主**包要登记的七处（漏一个会怎样）
+
+| 登记点 | 漏了会怎样 |
+|---|---|
+| `tsconfig.base.json` 的**手写**别名 | 实验名 ≠ 目录名 ✗，生成器推不出来 ✗ → `gen-tsconfig-paths` 直接报"no alias maps" ✗ |
+| `tsconfig.host.json` 的 reference | 客户端/宿主 pass 不含它 ✗ → **静默不检查** ✗ |
+| 包自己的 `tsdown.config.ts` | `build` 找不到入口 ✗（"Cannot find entry: lib/types/index.js" ✗） |
+| `verify-package-readme-model-experience` 白名单 | 该门禁要求每个包显式声明 kind ✗ |
+| `packages/experimental/README.md` 包表（双语 ✓） | `verify-doc-*` / 配对红 ✗ |
+| bundle 的 `dependencies` **与** patch insert | 服务不会被挂载 ✗（上一刀同款教训 ✓） |
+| `docs/*.md` 生成物 + 配对记录 | `verify-config-catalog` / `verify-translation-pairing` 红 ✗ |
+
+另有一条**构建顺序**教训：`build:lib:host` = **tsc → tsdown** ✓；只跑 tsdown 会因缺 `lib/types/*.js` 而失败 ✗
+（本机因 pnpm 前置被 lefthook 残留锁挡住 ✗，我改按顺序手工执行两步 ✓）。
+
+### 未解决的一处，已精确定位（下一刀首要任务）
+
+载荷暂时**不含协议分类** ✗（哪一行是选票／计票／发言／裁断 ✓）。原因是一个我尚未解释、但已隔离的解析问题 ✓：
+**从"新加入的包"的源码导入另一个工作区包的导出值，在本机测试运行器下取不到** ✗，
+而**同一个导入来自既有包却正常** ✓（A/B 实测 ✓：编排器 44 个测试全绿时，我的 4 个用例同时失败 ✗）。
+变量已收敛到"包新不新" ✗；两种待验证的假设是测试运行器的项目/依赖外化判定 ✗ 与该包的 `dsh.client`/tsconfig 形状 ✗。
+**没有**用"把前缀复制一份"绕过 ✗——那正是本仓反复出现的反模式 ✗。
+
+### 验证
+
+- `tsc -b tsconfig.host.json` EXIT=0 ✓；`tsdown` EXIT=0 ✓（两步手工按序 ✓）
+- 新包 **5 个测试**通过 ✓；受影响三包合计 **109 个测试**通过 ✓
+- **18 项门禁全 0** ✓（含 8 个生成器 `--check` ✓、`verify-export-jsdoc` ✓、`verify-translation-pairing` ✓）
+- `docs/config-catalog.md` 已收录新服务 ✓，中文侧索引同步 ✓
+
+**下一刀**：先解掉上述解析问题 ✓（它决定面板能否用协议分类 ✓），再写**浏览器半**——
+面板本体（右栏 tab 或会话 header 插槽 ✓）、`locales.ts`（i18n 门禁要求文案不得硬编码 ✓）、
+jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里的挂载 ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
