@@ -1427,6 +1427,30 @@ jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里�
 
 **仍待做**：Web 面板的**浏览器半**（面板组件 + `locales.ts` + jsdom 测试 + profile 挂载 ✗，M4 的最后一块 ✓）。
 
+## 11.31 M4 第八刀：Web 面板的浏览器半（内容与字典就位，部分完成）
+
+先照同族客户端包（`client-ui-agent-team`）取准了真实形状 ✓：浏览器入口绑**生成的 Remote 产物** ✓、
+`package.json` 声明 `./client` 导出与 `dsh.client.inject` ✓、`tsdown.config.ts` 经 `clientBundle` ✓、
+包内 tsconfig 继承 `tsconfig.base.client.json` ✓、槽位经 `ctx.slots.inject` 注册 ✓。
+`cluster-web` **已经**声明了 `./typert` 与 `./remote` ✓，所以入口那一步是现成的 ✓。
+
+这一刀落地的是**能脱浏览器验证的那一半** ✓：
+
+- `src/client/locales.ts` ✓：命名空间 `cluster` ✓，中文为键来源 ✓、英文按 `keyof typeof zh` 校对 ✓ ——
+  面板**不写任何字面文案** ✓；
+- `src/client/panel.ts` ✓：面板内容以**数据**表示 ✓（分组、类别标签、行、计数 ✓），组件只做薄映射 ✓；
+- **8 个纯层测试** ✓：顺序、类别标签、空态、花费与预算、计数行只在有类别时出现 ✓，
+  以及"渲染出的文案必须全是字典键" ✓ —— 用**回显式翻译器**让漏走字典的字面量现形 ✓。
+
+**两处是我自己写错、被类型与测试当场抓住的** ✗✓：
+
+1. `TeamTaskView['status']` 含 `'deleted'` ✓ → 模板字面量类型直接拒绝缺键的字典 ✓（补 `status.deleted` ✓）；
+2. `summaryKinds` 的模板漏了 `{task}` 占位符 ✓ → 渲染时会静默少一项 ✓（被断言抓到 ✓）。
+
+**验证**：`cluster-web` **15 个测试**通过 ✓、`tsc -b tsconfig.host.json` EXIT=0 ✓、相关 6 项门禁 0 ✓。
+
+**仍待做**：React 组件 + 客户端入口 + `package.json` 的 `./client` / `dsh.client` / `files` + 槽位注册 + jsdom 测试 ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
