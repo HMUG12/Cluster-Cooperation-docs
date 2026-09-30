@@ -1320,6 +1320,48 @@ oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
 **验证**：`gen-doc-graphs` 与 `--check` 均 0 ✓；`gen-doc-graphs.spec` 0 ✓（新增 3 例 ✓）；
 `tsc -b tsconfig.host.json` EXIT=0 ✓；`verify-translation-pairing` 0 ✓。
 
+## 11.28 M4 第五刀：把四个协议工具提升为 `tool-*` 包（已完成）
+
+§11.13 记下的待办是"提升为 `tool-*` 包以进入工具目录"，一直被两笔成本挡着（完整 `pnpm install` ✗ +
+改上游目录收割器 ✗）。这一刀把它做完了 ✓，而真正的成本比预估小得多——因为 `gen-tool-catalog.ts`
+**已经有一份可照抄的配方**（`tool-agent-team` 那行 ✓：mint 一个 Lead Agent + `ctx.provide('agentTeams', …)` ✓）。
+
+### 拆法：模型可见的一半 vs 事件驱动的一半
+
+| 去处 | 内容 |
+|---|---|
+| 新包 `packages/experimental/tool-cluster` | 四个协议模块（`broadcast` / `motion` / `roundtable` / `debate` ✓）+ 四个工具注册 ✓ + "仅 Lead 安装"的接线 ✓ |
+| 留在 `cluster-orchestrator` | 事件驱动策略：handoff / ready / review / spend ✓ + 那一半共享词汇的**反向依赖** ✓ |
+
+方向是刻意选的：**策略依赖工具包** ✗（而不是反过来 ✓），这样目录收割器只要 boot 新包就够 ✓
+（不必连编排器一起挂 ✓）。编排器用它仍需要的 6 个协议函数（`isTallyTask` / `readTally` / `tallySummary` /
+`isVerdictTask` / `readStatements` / `debateSummary` ✓），由新包**显式 re-export** ✓——
+不是子路径 ✗，因为包的 `exports` 只暴露 `.` ✗。
+
+### 三处只有"真跑"才会暴露的接线
+
+1. **bundle 必须依赖新包** ✓ —— patch 按包名解析插件 ✗，此前 router/orchestrator 是靠 **bundle 的依赖链**解析到的 ✓；
+   漏掉这一条，E2E 直接报 `tool-cluster: failed to import` ✗。
+2. **新包必须构建出 `lib/`** ✓ —— node 按 `exports` 读 `lib/index.js` ✗；其它包的 `lib/` 是既有产物 ✓，
+   新包没有就是导入失败 ✗（因此 `build:lib:host` 是 E2E 的前置 ✓）。
+3. **把函数放上公开面 = 它要补文档** ✗ —— re-export `isTallyTask` / `isVerdictTask` 后，
+   `verify-export-jsdoc` 立刻报它们缺 `@param`/`@returns` ✗（此前不在公开面上 ✓）。已补齐 ✓。
+
+### 验证
+
+- 新包 **29 个测试**（搬过来的四个 spec ✓）+ `cluster-orchestrator` **31 个** + `packages/cluster` 其余 ✓ 全部通过
+- `tsc -b tsconfig.host.json` EXIT=0 ✓
+- **18 项门禁全 0** ✓，含 `verify-tool-catalog`（目录确实 boot 了新插件并取到四个 schema ✓）、
+  `verify-export-jsdoc` ✓、`verify-translation-pairing` ✓、`verify-package-invariants` ✓
+- `docs/tool-catalog.md` 里新包一行 ✓：四个工具名 + requires/writes + note ✓
+
+**仍未验收**：`apps/cli/tests/cluster-motion.e2e.ts`（真实 CLI ✓）。它先暴露了上面第 1 条 ✗，
+修好后仍因第 2 条（`lib/` 未构建 ✗）失败 ✓；本轮末已启动 `pnpm run build:lib:host` ✓，
+**下次接手时应先重跑该 E2E 收尾** ✗——这是本轮唯一没走完的验收 ✓。
+
+**顺带纠正**：§11.26 里我把 `gen-doc-graphs` 的短名写成"`<组>-<目录>`" ✗，实际是
+**npm 名去掉 `@deepseek-ai/dsh-`** ✗（已在该节改写 ✓）。
+
 ---
 
 ## 12. 下一步（按优先级）
