@@ -1408,6 +1408,25 @@ oxlint 0 warning 0 error；双语 **110:110** 对齐；配对 1013 对一致。
 面板本体（右栏 tab 或会话 header 插槽 ✓）、`locales.ts`（i18n 门禁要求文案不得硬编码 ✓）、
 jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里的挂载 ✓。
 
+## 11.30 M4 第七刀：协议词汇改为服务发布（已完成）
+
+上一轮留下唯一悬着的问题——"新加入包的导出值在测试运行器里解析不到" ✗——这一轮用**判别实验**定了性 ✓：
+在**既有包**（`cluster-orchestrator`）的测试里做同一个值导入，结果**同样是 `undefined`** ✓✓
+→ 所以与"包新不新"无关 ✗，而是**该包的值导入在本仓测试解析下根本不成立** ✓
+（而**类型**导入是安全的 ✓，因为类型在运行时被擦除 ✓）。
+
+结论不是"绕过去" ✗，而是改用本仓已验证的惯用法 ✓：词汇由 `tool-cluster` **发布成服务** ✓
+（`ctx.provide('clusterProtocols', { kindOf })` ✓），`cluster-web` **结构化读取** ✓ ——
+与它读 `clusterConfig` / `clusterSpend` 完全同款 ✓；类型走 `import type` ✓。
+
+于是**协议分类落地了** ✓：任务行带 `kind` ✓、计数里有 `byKind` ✓；没有组合发布该词汇时
+**一个类别也不报** ✓（而不是猜一个 ✗）。
+
+**验证**：`tsc -b tsconfig.host.json` EXIT=0 ✓、`tsdown` EXIT=0 ✓、三个包合计 **111 个测试**通过 ✓
+（`cluster-web` 7 个 ✓）、**15 项门禁全 0** ✓（含 7 个生成器 `--check` 与翻译配对 ✓）。
+
+**仍待做**：Web 面板的**浏览器半**（面板组件 + `locales.ts` + jsdom 测试 + profile 挂载 ✗，M4 的最后一块 ✓）。
+
 ---
 
 ## 12. 下一步（按优先级）
