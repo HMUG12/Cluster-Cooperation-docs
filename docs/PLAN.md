@@ -1451,6 +1451,48 @@ jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里�
 
 **仍待做**：React 组件 + 客户端入口 + `package.json` 的 `./client` / `dsh.client` / `files` + 槽位注册 + jsdom 测试 ✓。
 
+## 11.32 M4 第九刀：Web 面板的浏览器半（面板与打包就位，部分完成）
+
+照 `packages/api/session-controller` 取准了**双面包**（host + browser）的真实结构 ✓：
+
+- 包内**三份** tsconfig ✓：`tsconfig.json` 是**方案文件**（`files: []` + 引用两面 ✓）、`tsconfig.host.json` 用**显式 `files` 清单** ✓（不与客户端面重叠 ✓）、
+  `tsconfig.client.json` 用 `include` ✓（两面共享 `src/types.ts` ✓）；
+- `exports["./client"]` ✓、`dsh.client{ inject, platform: 'web' }` ✓、`files` 加 `lib/client.js` ✓；
+- 构建是 `clientBundle(id, ['lib/types/index.js'], { hostPhase: true })` ✓；
+- **客户端面还必须登记进根 `tsconfig.client.json`** ✓（如 `api/remotes/tsconfig.client.json` ✓），否则它不进客户端聚合 ✓。
+
+面板做成**会话头部动作** ✓（与 `TeamAction` 同款 ✓：框架把 `sessionId` 作为 prop 传入 ✓、注入的 `load` 返回 `RemoteResult` ✓），
+而不是窗格标签 ✗ —— 后者是**资源驱动**的 ✗（要资源注册 + 打开地址 ✗），与一份只读视图不匹配 ✓。
+
+**两处是我的结构错误，被构建当场抓住** ✗✓：
+
+1. 我一开始把**宿主面**写成了包级 `tsconfig.json` ✗ → 于是宿主构建去编译 `.tsx` ✗（报 `Cannot find module 'react'` ✗）；
+2. 忘了把客户端面登记进根 `tsconfig.client.json` ✗。
+
+**验证**：`tsc -b tsconfig.host.json` **0** ✓、`tsc -b …/tsconfig.client.json` **0** ✓、`cluster-web` 15 个测试通过 ✓
+（`pnpm install` 仍然只在本机 `postinstall` 的 Lefthook 残留锁处退出 1 ✗，依赖链接与 lockfile 更新均已完成 ✓）。
+
+**仍待做**：profile 挂载 ✓（照 `agent-team-web-profile` 的 `cordis.patch.yml` ✓）与 jsdom 组件测试 ✓。
+
+## 11.33 复检：一次误配的构建污染了 592 个文件，以及它揭出的两条既有缺口
+
+本轮做浏览器半时，我先把包级 `tsconfig.json` 写成了**宿主面** ✗（`include: ["src"]` ✓）→ 编译器于是把依赖的
+**客户端源码**并进程序 ✗，并把 **592 个产物（`.js` / `.d.ts` / `.map`）吐进了各包的 `src/`** ✗。
+它们**未被跟踪** ✓（不会进提交 ✓），但会**污染门禁** ✗：`verify-export-jsdoc` 扫到其中一份**陈旧的**
+`service.d.ts` ✗，报出 5 条"缺 JSDoc" ✗ —— 而那 5 条对应的**源文件其实是有文档的** ✓。
+
+清理前先自检 ✓：枚举 592 个待删项 ✓、确认其中**被跟踪的为 0** ✓，才执行 ✓（删后工作区只剩 16 项真实改动 ✓）。
+
+顺带揭出两条**既有缺口**（都与 cluster 无关 ✓）：
+
+1. `gen-client-catalog --check` ✗ 报 **66 条契约违约** ✓（样本是 `packages/client/ui-chat` 等 ✓）——
+   我在其日志里检索 `cluster` / `experimental` 的结果为 **0** ✓；且那次"重生成"**没有改动任何文件** ✓（`git status` 可证 ✓）。
+2. `api/session-controller` 客户端面的两个错误类，**参数属性缺自身 JSDoc** ✗ —— 只有当**那一面首次被构建**时才会暴露 ✓。
+   我补上了 ✓：`@param` 不够 ✓，门禁要的是**属性上**的文档 ✓（它读的是 `.d.ts` ✓）。
+
+**教训**：门禁扫描的是**磁盘**，不是**索引** ✗ —— 构建残留既会**伪造**违规 ✗，也会**掩盖**真违规 ✗，
+所以"先清理、再跑门禁"应当成规矩 ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
