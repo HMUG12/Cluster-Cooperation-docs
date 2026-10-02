@@ -1557,6 +1557,27 @@ fork 的提交推不上去 ✗，我把它查到底了 ✓：拦住的是 **`pre
 **验证**：`tsc -b tsconfig.host.json` **0** ✓、`cluster-web` **20 个测试**通过 ✓（含 5 个组件测试 ✓）、
 `verify-package-readme-model-experience` **299 份全部合规** ✓。
 
+## 11.38 M4 收尾复检：两组权威门禁的**真实**全貌（如实记录）
+
+此前几轮我跑的是**自列清单** ✗（教训见 §11.26 ✓）。这一轮跑 `scripts/run-gates.ts` 的权威分组 ✓：
+
+- `hygiene`：**12 过 / 4 败** ✗ —— `publint` ✗、`node-next types` ✗、`Cordis config` ✗、`built package invariants` ✗；
+- `doc-sync`：**34 过 / 7 败** ✗ —— `documentation build` ✗（VitePress 配置加载失败 ✗）、`doc-typecheck` ✗、
+  `client catalog` ✗（**既有**的 66 条违约 ✓，与 cluster 无关 ✓）、**`tsconfig paths`** ✗、**`package README Summaries`** ✗、
+  `documentation standard tests` ✗（22 中 1 ✗）、`documentation site checks` ✗（64 中 2 ✗）。
+
+**其中两处最可能属于我这两刀** ✓（已定位、尚未修 ✗）：
+
+1. **`tsconfig paths`** ✗：与 §11.17 同款根因 ✓ —— 生成器只认 `@deepseek-ai/dsh-<目录名>` ✗，
+   而新包的 npm 名是 `@deepseek-ai/dsh-experimental-cluster-web-profile` ✗ → 必须在生成区**之外**手写别名 ✓
+   （与 `cluster-command` 那次完全一样 ✓）；
+2. **`package README Summaries`** ✗：新包的 README 摘要规则 ✓（很可能要有一句固定句式 ✓）。
+
+**其余多与环境/既有缺陷有关** ✓：`documentation build` 需要完整客户端构建 ✗、`publint` / `node-next types` /
+`built package invariants` 需要完整 `build:lib` ✗……这些在本机尚未复验 ✗，下一轮逐条定性 ✓。
+
+**说明**：整轮 `hygiene`+`doc-sync` 共 **46 过 / 11 败** ✓；我没有把"绿"说成整体绿 ✗。
+
 ---
 
 ## 12. 下一步（按优先级）
