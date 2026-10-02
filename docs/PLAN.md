@@ -1493,6 +1493,26 @@ jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里�
 **教训**：门禁扫描的是**磁盘**，不是**索引** ✗ —— 构建残留既会**伪造**违规 ✗，也会**掩盖**真违规 ✗，
 所以"先清理、再跑门禁"应当成规矩 ✓。
 
+## 11.34 M4 第十刀：把面板挂进 Web profile（已完成，留一处文档欠账）
+
+- 新建 `packages/experimental/cluster-web-profile` ✓（照 `agent-team-web-profile` 的骨架 ✓：`dsh.bundle.patch` ✓、
+  一条 `insert` ✓、`src/index.ts` 只有 `export {}` ✓），登记的正是 `@deepseek-ai/dsh-experimental-cluster-web` ✓ ——
+  也就是 Host 层挂载的**同一个包** ✓（它自带 `dsh.client` ✓，所以浏览器侧由这一层点亮 ✓）。
+- 登记：根 `tsconfig.host.json` ✓；`cluster-web` 的两句已失真的 README 说明按事实改写 ✓。
+
+**它让三条 README 门禁第一次真正跑到我这些包上** ✗ —— 揭出的都是我前几刀的欠账 ✓：
+
+1. 中文 README 的**内部链接必须指向 `.zh.md`** ✓；
+2. `Model Experience` 的**短句式必须登记进脚本的审计白名单** ✓（`None, as …` ✓ / `Indirectly, through …` ✓）——
+   `cluster-web` 记 `none` ✓、`cluster-web-profile` 记 `indirect` ✓；且 **`Model Experience` 与 `Known Limitations`
+   必须是最后两个 H2** ✓（`tool-cluster` 的 `## Dev Note` 因此降为 H3 ✓）；
+3. **仍有欠账** ✗：`tool-cluster` 需要**结构化**的 Model Experience 段 ✓（四个工具的模型视图与 token 影响，含 H5 逐字块 ✓）——
+   它拥有面向模型的工具 ✗，不能走短句式 ✓。这是下一件该做的事 ✓。
+
+**验证**：`tsc -b tsconfig.host.json` 0 ✓；`check-workspace-constraints` ✓、`verify-package-invariants` ✓、
+`verify-md-links` ✓、`verify-md-wrap` ✓、`verify-subsystem-pages` ✓、`gen-config-catalog --check` 0 ✓（新增包需重生成 ✓）；
+上述第 3 条仍红 ✗（已定位 ✓）。
+
 ---
 
 ## 12. 下一步（按优先级）
