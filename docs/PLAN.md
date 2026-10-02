@@ -1513,6 +1513,22 @@ jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里�
 `verify-md-links` ✓、`verify-md-wrap` ✓、`verify-subsystem-pages` ✓、`gen-config-catalog --check` 0 ✓（新增包需重生成 ✓）；
 上述第 3 条仍红 ✗（已定位 ✓）。
 
+## 11.35 结清 README 门禁的欠账（三处规范，一次学清）
+
+`verify-package-readme-model-experience` 覆盖 **299 份 README** ✓，它对我这几包第一次真正生效 ✓，
+于是三处规范被逼出来 ✓：
+
+1. **短句式只给审计白名单里的包** ✓：句子必须**恰好**是 `None, as … .` ✓ 或 `Indirectly, through … .` ✓，
+   且该节的**原始非空行必须恰好三行** ✓（句子 ✓、`#### KV Cache effect` ✓、一段 ✓）——
+   因此**锚点必须放在 H2 之后** ✗（放在 H2 之前会让"段后内容"多算一行 ✗，我正是这样被拒的 ✗）；
+2. **结构化形态** ✓（`tool-cluster` 用）：`### <条目>` + **恰好三个有序 H4** ✓
+   （`#### What the model sees` ✓ / `#### Token effect` ✓ / `#### KV Cache effect` ✓），
+   且该节最后一段之后**只能**接 H5 逐字块 ✗ —— 我在段尾放了 `-----` 分隔符 ✗，
+   门禁把它读成"段后内容" ✗（通过的工具包那里是**直接接下一个 H2** ✓）；
+3. `Model Experience` 与 `Known Limitations` 必须是**最后两个 H2** ✓。
+
+**验证**：`verify-package-readme-model-experience` ✓（**299 份全部合规** ✓）、配对 ✓、断链 ✓、折行 ✓ 全 0 ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
