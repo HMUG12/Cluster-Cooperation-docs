@@ -1628,6 +1628,22 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 **下一步**：启动宿主验证 `/cluster` 六条 ✓（仍不需客户端构建 ✓）；随后构建客户端包 ✓
 （`build:lib:client` ✓）在浏览器中看到面板 ✓。
 
+## 11.42 首次真启动抓出的两处真缺陷（已修并推送）
+
+用 `--patch` 临时叠加后**真启动**一次 ✓，抓出两处**读代码看不出来**的缺陷 ✓：
+
+1. **双面包被重复挂载** ✗ —— `cluster-web` 是 host + browser **双面**包 ✓，Host bundle 已经挂过它 ✓，
+   而它的**浏览器入口随同一次挂载生效** ✓；我在 web profile 里又插了一行 ✗ →
+   加载器以 `service "clusterWeb" has been registered` **拒绝启动** ✗。
+   修法 ✓：该层**不再声明任何行** ✓（保留 patch 文件 ✓，内容为空列表 ✓）。
+   **教训** ✓：`agent-team-web-profile` 的"插一行"写法适用于**纯客户端包** ✓（`client-ui-agent-team` ✓），
+   对**双面包**却是重复挂载 ✗ —— 又一次"照抄模板时忽略了结构差异" ✓（与 §11.39 同类 ✓）。
+2. **生成的 typert 产物需要 `zod`** ✗ —— `lib/typert.host.js` 会 `import 'zod'` ✓，
+   而包从未声明它 ✗ → 运行时在隔离 node_modules 下报 `Cannot find package 'zod'` ✗
+   （对照 `session-controller` 的依赖写法即知 ✓）。
+
+另有一条流程教训 ✓：**`pnpm-lock.yaml` 必须随依赖声明一起提交** ✓（CI 的 frozen-lockfile 门禁 ✓）。
+
 ---
 
 ## 12. 下一步（按优先级）
