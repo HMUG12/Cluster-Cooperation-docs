@@ -1589,6 +1589,20 @@ fork 的提交推不上去 ✗，我把它查到底了 ✓：拦住的是 **`pre
 **验证**：`gen-tsconfig-paths --check` **0** ✓、`verify-package-readme-summaries` **0** ✓、
 `verify-translation-pairing` **0** ✓、`tsc -b tsconfig.host.json` **0** ✓。
 
+## 11.40 权威门禁余下失败的逐条定性（已完成定性，未修）
+
+| 门禁 | 定性 | 依据 |
+|---|---|---|
+| `built package invariants` ✗ | **环境** | 它崩在 IDE 的 **safe-delete 批量护栏**上（`count 539 > threshold 500`），连自己产的临时目录都清不掉 |
+| `Cordis config` ✗ | **既有** | `apps/cli/tests/profiles/acp/cordis.yml: root must be a Loader entry array`，不在本轮 diff 内 |
+| `node-next types` ✗ / `publint` ✗ | 需**完整构建**复验 | 二者针对已构建产物 |
+| `documentation build` ✗ / `doc-typecheck` ✗ / `documentation standard tests` 1/22 ✗ / `documentation site checks` 2/64 ✗ | 需**完整客户端与站点构建**复验 | VitePress 配置加载失败 |
+| `client catalog` 66 条 ✗ | **既有** | 日志内检索 `cluster` / `experimental` 为 **0** |
+
+**关键结论**：目前**没有一条失败被证实来自 cluster 代码**。我造成的两条（`tsconfig paths` §11.39、README 摘要 §11.39）已修并复验。
+
+顺带把门禁残留目录（`.dsh-built-invariant-*/`）纳入 `.gitignore`，避免再次误导粗放提交。
+
 ---
 
 ## 12. 下一步（按优先级）
