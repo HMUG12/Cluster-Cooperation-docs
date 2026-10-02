@@ -1578,6 +1578,17 @@ fork 的提交推不上去 ✗，我把它查到底了 ✓：拦住的是 **`pre
 
 **说明**：整轮 `hygiene`+`doc-sync` 共 **46 过 / 11 败** ✓；我没有把"绿"说成整体绿 ✗。
 
+## 11.39 清掉两处权威门禁失败（已完成）
+
+- **`tsconfig paths`** ✗：**同一类根因第三次咬我** ✓ —— 生成器只认 `@deepseek-ai/dsh-<目录名>` ✗，
+  新包 `@deepseek-ai/dsh-experimental-cluster-web-profile` 推不出来 ✓ → 必须在生成区**之外**手写别名 ✓
+  （与 `cluster-command` 那次一模一样 ✓）；已加 ✓，`--check` 现在为 0 ✓。
+- **`package README Summaries`** ✗：Summary **限 100 词** ✓（`cluster-web` 103 词 ✓、`tool-cluster` 109 词 ✓）
+  → 各精简数词 ✓；现在 **355 份英文 README 全部达标** ✓。
+
+**验证**：`gen-tsconfig-paths --check` **0** ✓、`verify-package-readme-summaries` **0** ✓、
+`verify-translation-pairing` **0** ✓、`tsc -b tsconfig.host.json` **0** ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
