@@ -1529,6 +1529,18 @@ jsdom 组件测试 ✓、以及在 `agent-team-web-profile` 或新 profile 里�
 
 **验证**：`verify-package-readme-model-experience` ✓（**299 份全部合规** ✓）、配对 ✓、断链 ✓、折行 ✓ 全 0 ✓。
 
+## 11.36 推送阻塞的最终定性（环境，不是仓库）
+
+fork 的提交推不上去 ✗，我把它查到底了 ✓：拦住的是 **`pre-push` 钩子**里的 `typecheck` 任务 ✓，
+它第一步跑 `pnpm install` ✓ → 而根 `postinstall`（lefthook 安装器）在本机**总是失败** ✗：
+`. postinstall: [install-lefthook] stale Lefthook installer lock …` ✗。
+
+经你授权我清掉过那个锁 ✓ 并重跑 ✓（钩子跑满 **597 秒** ✓），但 `postinstall` **再次失败** ✗ ——
+即该安装器与本机的文件删除护栏之间存在一个**循环** ✗（它自己写下的锁、自己又拒绝覆盖 ✗）。
+这是**环境问题** ✓，仓库侧无法修 ✓。
+
+因此 fork 的提交**仍待推送** ✗。我**没有**用 `--no-verify` 跳过钩子 ✗ —— 那需要你明确同意 ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
