@@ -1603,6 +1603,31 @@ fork 的提交推不上去 ✗，我把它查到底了 ✓：拦住的是 **`pre
 
 顺带把门禁残留目录（`.dsh-built-invariant-*/`）纳入 `.gitignore`，避免再次误导粗放提交。
 
+## 11.41 M4 验收第一步：实验层在真实 `web` profile 中**组合成功**（已完成）
+
+关键发现 ✓：根脚本 `"dsh": "node --import tsx/esm apps/cli/src/bin.ts"` ✓ —— **CLI 源码直跑** ✓，
+无需全量构建 ✓；且 CLI 自带两个**非侵入**开关 ✓：`--patch <yml>`（临时叠加 ✓，不改用户 profile ✓）
+与 `--dump-config`（打印组合后的层栈并退出 ✓，不启服务器 ✓）。
+
+于是：
+
+```
+node --import tsx/esm apps/cli/src/bin.ts --profile web \
+  --patch packages/experimental/cluster-bundle/cordis.patch.yml \
+  --patch packages/experimental/cluster-web-profile/cordis.patch.yml \
+  --dump-config          → exit 0 ✓
+```
+
+打印出的层栈中**七个层全部就位** ✓：`agent-team` → `tool-agent-team` → `cluster-config` → `cluster-router`
+→ `cluster-orchestrator` → `tool-cluster` → `cluster-web` → `ui-cluster`（浏览器面板 ✓），
+**无解析错误** ✓。
+
+**意义**：最大的不确定性——"这些包第一次组合起来是否成立"——**已排除** ✓：
+插件组合、包名解析、patch 链顺序均有效 ✓，且未触碰用户 profile ✓、未启动服务器 ✓、未需客户端构建 ✓。
+
+**下一步**：启动宿主验证 `/cluster` 六条 ✓（仍不需客户端构建 ✓）；随后构建客户端包 ✓
+（`build:lib:client` ✓）在浏览器中看到面板 ✓。
+
 ---
 
 ## 12. 下一步（按优先级）
