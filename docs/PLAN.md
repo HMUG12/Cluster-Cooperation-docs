@@ -1669,9 +1669,9 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 
 | 提交 | 做了什么 |
 |---|---|
-| `114fd07b65` ✓ | 总览多带一个 `configured` ✓——**只有配置服务知道文档是否存在** ✓；且**没有答案时保持"没有答案"** ✓（`input.configured ?? true` ✓）：面板不会因为一个它无从判断的集群而拦人 ✓ |
-| `8ba991fd16` ✓ | 纯派生层给出"为什么空"的措辞 ✓——用的是**面板自己的话** ✓，不是服务层的报错 ✓ |
-| `60e3ea15a3` ✓ | 组件把它渲染出来 ✓：用户看到的是"先完成设置" ✓，而不是"集群空闲" ✗ |
+| `feat(cluster): carry whether a cluster document exists to the browser` ✓ | 总览多带一个 `configured` ✓——**只有配置服务知道文档是否存在** ✓；且**没有答案时保持"没有答案"** ✓（`input.configured ?? true` ✓）：面板不会因为一个它无从判断的集群而拦人 ✓ |
+| `feat(cluster): tell a panel why an unconfigured cluster is empty` ✓ | 纯派生层给出"为什么空"的措辞 ✓——用的是**面板自己的话** ✓，不是服务层的报错 ✓ |
+| `feat(cluster): show the unconfigured notice in the panel` ✓ | 组件把它渲染出来 ✓：用户看到的是"先完成设置" ✓，而不是"集群空闲" ✗ |
 
 **验证** ✓：`cluster-web` 纯层 7 例 + 面板 9 例 + 组件 10 例 ✓（§11.48 又各补一例 ✓）。
 
@@ -1679,14 +1679,14 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 
 功能对了，但"看着像贴上去的" ✗；这一刀补的是**观感** ✓ 与**声明** ✓：
 
-- `f46ab67764` ✓：面板改用 **CSS module** ✓（行、小节标题、空态、未配置提示共用一套间距与层级 ✓；
+- `feat(cluster): style the panel with a module instead of loose elements` ✓：面板改用 **CSS module** ✓（行、小节标题、空态、未配置提示共用一套间距与层级 ✓；
   面板、边框、文字色**继承宿主** ✓，**不自带调色板** ✗）——此前它是**未样式化的裸文本** ✓。
-- `f4b4079041` ✓：外框、标题、摘要、未配置提示全部改用模块类 ✓；并把**运行时的 `cluster.yml` 移出版本控制** ✓——
+- `feat(cluster): finish the panel's own surface, and stop tracking runtime config` ✓：外框、标题、摘要、未配置提示全部改用模块类 ✓；并把**运行时的 `cluster.yml` 移出版本控制** ✓——
   本地状态就该是未跟踪且被忽略 ✓，仓库里留的是**示例文档** ✓。
-- `1c850673c2` ✓：刷新改用**应用自己的图标控件** ✓——"自己画一个刷新" ✗ 正是那种读起来"外来"的小差异 ✓。
-- `2ce479738a` ✓：把面板用到的**客户端原语写进依赖声明** ✓——此前只是**客户端面经传递**解析到它 ✗，那不是声明 ✓。
+- `feat(cluster): use the app's own refresh control in the panel` ✓：刷新改用**应用自己的图标控件** ✓——"自己画一个刷新" ✗ 正是那种读起来"外来"的小差异 ✓。
+- `chore(cluster): declare the client primitives the panel imports` ✓：把面板用到的**客户端原语写进依赖声明** ✓——此前只是**客户端面经传递**解析到它 ✗，那不是声明 ✓。
 
-**顺带记一条仓库功课** ✓：`cluster.yml` 曾被 `f46ab67764` 连带提交 ✗，又在 `f4b4079041` 里删除并进 `.gitignore` ✓——
+**顺带记一条仓库功课** ✓：`cluster.yml` 曾被 `feat(cluster): style the panel with a module instead of loose elements` 连带提交 ✗，又在 `feat(cluster): finish the panel's own surface, and stop tracking runtime config` 里删除并进 `.gitignore` ✓——
 即"运行时的用户文档"一度进了版本库 ✗。
 
 ## 11.46 M4 第十四刀：从浏览器写集群文档（已完成）
@@ -1695,12 +1695,12 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 
 | 提交 | 职责 |
 |---|---|
-| `eb332faeef` ✓ | **先让服务能写** ✓：候选文档经**与读同一份 reader** 校验 ✓；写入的是**调用方自己的文本** ✓（具名路由保持具名 ✓）；字段被拒**不碰文件** ✓ |
-| `4ab1736e91` ✓ | 把写暴露成 **Remote 方法** ✓：权限规则与读同款 ✓（必须是集群内的活成员 ✓）；没有配置服务时**如实说"没人保存"** ✓，不假装保存成功 ✗ |
-| `a77072ab68` ✓ | 发布**已加载文档**与**未配置时的 starter** ✓；starter **只带结构** ✓——模型 id 是本仓不知道的环境事实 ✗、成员描述是需要翻译的文案 ✗，两者都**留给操作者** ✓ 而不是在这里编造 ✗ |
-| `d6f7eeef9f` ✓ | **解析放在拥有 schema 的地方** ✓：面板编辑文本 ✓，若让浏览器自己解析 ✗ 就等于对"什么合法"有第二份意见 ✗；写方法**返回是否写入** ✓ 而不是抛 ✗（被拒字段是编辑的**正常结果** ✓） |
-| `1f704a200f` ✓ | **文本也由宿主产出** ✓（与"解析在宿主"同一理由 ✓）：已配置读成**文件自己的文本** ✓，未配置读成 starter ✓ |
-| `a1a0283d0f` ✓ | 面板落地**设置区** ✓：打开时才读文档 ✓（只看名册的人不会顺带拉一份文档 ✓）、原样送回用户输入 ✓、**原样显示宿主的拒绝理由** ✓（只有拥有 schema 的服务能说清该改哪个字段 ✓） |
+| `feat(cluster): let a user write the cluster document at all` ✓ | **先让服务能写** ✓：候选文档经**与读同一份 reader** 校验 ✓；写入的是**调用方自己的文本** ✓（具名路由保持具名 ✓）；字段被拒**不碰文件** ✓ |
+| `feat(cluster): let the browser write the cluster document` ✓ | 把写暴露成 **Remote 方法** ✓：权限规则与读同款 ✓（必须是集群内的活成员 ✓）；没有配置服务时**如实说"没人保存"** ✓，不假装保存成功 ✗ |
+| `feat(cluster): hand the browser a document to edit` ✓ | 发布**已加载文档**与**未配置时的 starter** ✓；starter **只带结构** ✓——模型 id 是本仓不知道的环境事实 ✗、成员描述是需要翻译的文案 ✗，两者都**留给操作者** ✓ 而不是在这里编造 ✗ |
+| `feat(cluster): parse edited document text where the schema lives` ✓ | **解析放在拥有 schema 的地方** ✓：面板编辑文本 ✓，若让浏览器自己解析 ✗ 就等于对"什么合法"有第二份意见 ✗；写方法**返回是否写入** ✓ 而不是抛 ✗（被拒字段是编辑的**正常结果** ✓） |
+| `feat(cluster): hand the panel text it can save back` ✓ | **文本也由宿主产出** ✓（与"解析在宿主"同一理由 ✓）：已配置读成**文件自己的文本** ✓，未配置读成 starter ✓ |
+| `feat(cluster): let the panel edit and save the cluster document` ✓ | 面板落地**设置区** ✓：打开时才读文档 ✓（只看名册的人不会顺带拉一份文档 ✓）、原样送回用户输入 ✓、**原样显示宿主的拒绝理由** ✓（只有拥有 schema 的服务能说清该改哪个字段 ✓） |
 
 **三处测试当场抓出的真缺陷** ✓（都不是测试写法问题 ✗）：
 
@@ -1717,20 +1717,20 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 
 ## 11.47 M4 第十五刀：说明与生成物对齐（已完成）
 
-- `980560a0c4` ✓：README 曾写"把 `cluster-web-profile` 加进 web profile 就会出现面板" ✗——
+- `docs(cluster): say how a web session actually gets the panel` ✓：README 曾写"把 `cluster-web-profile` 加进 web profile 就会出现面板" ✗——
   而那一层**故意是空行** ✓（§11.42 ✓），加它**什么都不会发生** ✓。真相是：
   **宿主服务与浏览器入口是 `cluster-bundle` 里的同一行** ✓，**应用那份 profile** 才是面板可达的原因 ✓；
   空 profile 存在的意义就是**记录它为什么必须为空** ✓。
-- `fec23c4f1d` ✓：为面板新增的配置方法都返回 `ClusterDocument` ✓，而 **doc-graph 门禁拒绝它无法归类的类型** ✗
-  → **生成器失败，启动跟着失败** ✗。修法 ✓：把该类型指向集群子系统页 ✓、重新生成产物 ✓、重新记录配对 ✓（`d5505aab13` ✓）。
-- `efdd50db52` ✓：面板产物运行时需要 `zod` ✓，而包此前从未声明 ✗（§11.42 ✓）→ 声明与 lockfile 一并对齐 ✓。
+- `fix(cluster): classify the document type the new service methods return` ✓：为面板新增的配置方法都返回 `ClusterDocument` ✓，而 **doc-graph 门禁拒绝它无法归类的类型** ✗
+  → **生成器失败，启动跟着失败** ✗。修法 ✓：把该类型指向集群子系统页 ✓、重新生成产物 ✓、重新记录配对 ✓（`docs: re-record the config catalog pairing after regeneration` ✓）。
+- `chore(cluster): record the dependency the panel's artifact needs` ✓：面板产物运行时需要 `zod` ✓，而包此前从未声明 ✗（§11.42 ✓）→ 声明与 lockfile 一并对齐 ✓。
 
 **教训** ✓：**"服务方法的返回类型"也是一份要被门禁归类的公开面** ✓——
 新方法带出一个未登记的类型，红的是**生成器** ✗，而它挡住的却是**启动** ✓。
 
 ## 11.48 结清 10-03 之后悬空的改动（已完成）
 
-`d5505aab13` 之后工作区里留着两处**未提交**的改动 ✓，本轮验完并提交 ✓：
+`docs: re-record the config catalog pairing after regeneration` 之后工作区里留着两处**未提交**的改动 ✓，本轮验完并提交 ✓：
 
 1. **`cluster-bundle` 的补丁规格一直是红的** ✗——`patch.spec.ts` 仍按**五行**断言 ✓，
    而 `tool-cluster`（09-30 20:37 ✓）与 `cluster-web`（09-30 22:02 ✓）早已是第六、七行 ✓。
@@ -1749,7 +1749,7 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 
 | 分组 | 结果 | 失败项 |
 |---|---|---|
-| `hygiene` | **13 过 / 3 败** ✗ | `constraints` ✗（**本轮新引入，见下** ✓）、`node-next types` ✗（既有 ✓）、`Cordis config` ✗（既有 ✓） |
+| `hygiene` | **13 过 / 3 败** ✗ → 复检 **14 过 / 2 败** ✓ | 首轮：`constraints` ✗（并行改动带出 ✓，**已由改动者自己修掉** ✓）、`node-next types` ✗、`Cordis config` ✗ |
 | `doc-sync` | **40 过 / 1 败** ✓ | `documentation site checks` ✗（**沙箱**：测试要建一个指向仓库外的符号链接，报 `EPERM` ✓） |
 
 与 §11.38 的 46 过 / 11 败相比，**失败从 11 条降到 4 条** ✓，且两条是**环境**（符号链接沙箱 ✓ + acp profile ✓）：
@@ -1758,11 +1758,17 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
   `package README Summaries` ✓（§11.39 ✓）、`built package invariants` ✓（§11.40 的"safe-delete 护栏"不再触发 ✓）、
   `publint` ✓（本轮一次通过 ✓）、**`client catalog`** ✓（§11.40 记的 66 条既有违约已消 ✓，同轮里由并行的助手修掉 ✓）。
 - **仍然失败** ✓：
-  1. **`constraints`** ✗ —— 由**并行进行的** `cluster-web/package.json` 改动引入 ✓：
-     `files` 写成 `lib/types/types.js`，而本仓要求 `lib/types/**/*.js` ✓。
-     这是"新加的 `./types` 导出"带出来的 ✓，**尚未提交** ✓，属于**进行中** ✓。
-  2. **`node-next types`** ✗ —— 完整 `build:lib:host` 之后**仍然失败** ✓（§11.40 说它需完整构建复验 ✓，
-     这一轮复验了 ✓，结论是**不是构建缺失** ✗）。本包族是否牵涉其中**尚未定性** ✗。
+  1. **`constraints`** ✗ → ✓ —— 由**并行进行的** `cluster-web/package.json` 改动引入 ✓：
+     新加的 `./types` 导出一度带一个指向 `lib/types/types.js` 的**运行时默认** ✓，
+     规则于是要求 `files` 里出现 `lib/types/**/*.js` ✓（`usesEmittedTreeDefaults` ✓）。
+     改动者随后把它改成**只有 types** ✓、并去掉那条 `files` 条目 ✓ → **复检 0** ✓（`publint` 也是 0 ✓）。
+     这正是"并行编辑同一个包"的代价 ✓：门禁在两次编辑之间跑 ✓，看到的就是**中间态** ✓。
+  2. **`node-next types`** ✗ —— **已定性为环境** ✓：该门禁要给一个临时消费者工程**建符号链接** ✓
+     （`linkPackage` 与 `@types/node` ✓），而**本机不能创建符号链接** ✓——同一次扫描里
+     `project-doc-site.spec.ts` 的符号链接用例报的是同一个 `EPERM` ✓。
+     更麻烦的是它把**非 tsc 的异常也吞进 `catch`** ✗、只打印 tsc 的 stdout/stderr ✗ →
+     **诊断是空的** ✓，于是看起来像"类型失败" ✗。§11.40 写的"需完整构建复验" ✗ 本轮复验了 ✓：
+     **完整构建之后仍然失败，而且它不是类型问题** ✓。
   3. **`Cordis config`** ✗ —— `apps/cli/tests/profiles/acp/cordis.yml: root must be a Loader entry array` ✓，
      不在本工程 diff 内 ✓（既有 ✓）。
   4. **`documentation site checks`** ✗ —— `project-doc-site.spec.ts` 的"拒绝真实路径逃出仓库"一例
@@ -1774,12 +1780,68 @@ node --import tsx/esm apps/cli/src/bin.ts --profile web \
 
 ---
 
+## 11.50 环境解锁，以及 §11.49 之外的三处红灯（已完成并推送）
+
+前半是**环境** ✓，后半是**门禁** ✓；两者合起来才让"真跑"重新成为可能 ✓。
+
+### 环境：三件事，逐条解除
+
+1. **工作区写入被 Windows 权限挡住** ✗ —— 会话工作区根缺写入授权 ✓（`SetNamedSecurityInfoW` Win32 5 ✗）。
+   修好权限项之后，**真正的拦路者才现形** ✓：它不是权限项，而是**完整性标签** ✓——沙箱子进程跑在
+   **Low 完整性** ✓，工作区根有 Low 标签 ✓、而**嵌套的仓库目录没有** ✗，于是仓库内一切子进程写入
+   都被 no-write-up 拒绝 ✗（`pwsh` / `node` 全线失效 ✓，而 DSH 自己的文件工具照常 ✓——它们在宿主进程里跑 ✓）。
+   只有**切到完全权限**能解 ✓（已由你切换 ✓）；诊断报告与逐条还原命令留在 `E:\新创意构思\acl-recovery\` ✓。
+2. **`pnpm` 全链路死在一把陈旧锁上** ✗ —— `.git/dsh-lefthook-install.lock` 写于 **10-02 18:54** ✓、
+   记录的 PID 早已不存在 ✓、无任何进程持有 ✓。删掉它之后 `pnpm install` **19.7s 成功** ✓、
+   钩子装回 ✓（`pre-commit` / `pre-push` / `pre-merge-commit` ✓）。
+3. **§11.36 的推送阻塞就此解除** ✓ —— 那次定性为"安装器与本机删除护栏互锁" ✗，实际是**陈旧锁 + 沙箱下的删除限制** ✓。
+   本轮 `pre-commit`（lint / whitespace / vendor guard / third-party notices ✓）与 `pre-push` **真实跑过并通过** ✓，
+   **提交已推送** ✓，且**没有用 `--no-verify`** ✓。
+
+### 门禁：除 §11.48 / §11.49 已记的两处，还修掉三处（全部是我们的）
+
+1. **中文 README 骨架不合规（4 个包）** ✗ —— 门禁要求 `## 概述` / `## 目录` / `### 开发备注` ✓，
+   而 8 个包里 **4 个**写成 `## 摘要` / `## 概要` / `## Summary` / `## Table of Contents` /
+   `### 开发说明` / `### 开发者注记` ✗。门禁在**第一个**失败文件就停 ✗，所以历次只报出 `cluster-command` ✓——
+   §11.38 / §11.40 把它归为"需完整构建复验" ✗ 是**误判** ✓：它一直是我们自己的 ✓。一次修齐 8 处标题 + 3 条目录项 ✓。
+2. **中文工具目录里两个锚点坏了** ✗ —— `tool-cluster` 那节的 anchor 多写一个 `dsh-` ✓，
+   而 `todo` 的**共享片段别名**被挤到了那一节上 ✗ → todo 段落拿不到别名 ✓。
+   修好后 `project-doc-site` 的相应用例转绿 ✓。
+3. **`client catalog` 的过期正是我们造成的** ✗ —— 新面板成为 `conversation.session.header.actions`
+   的一个**占用者** ✓（`experimental-cluster-web ClusterPanel id 'cluster'` ✓），生成物必须重生成并提交 ✓。
+   §11.33 的"66 条既有违约、与本项目无关" ✗ 不适用于这次的**陈旧** ✓。
+
+### `publint` 的根因不在 CSS，而在一个多余的运行时默认
+
+面板样式被动态 bundle **内联** ✓，而 `files` 的规范形状要求发布 `lib/types/**/*.js` ✓——
+于是 tsc 吐出的客户端中间产物（`import './ClusterPanel.module.css'` ✓）被发布 ✓，而**那个文件从不产出** ✗
+→ 发布载荷不闭合 ✗。真正的开关是 `usesEmittedTreeDefaults` ✓：`./types` 的 `default` 指向产物树 ✓，
+才让整棵树的 JS 进了 `files` ✓。而**没有任何消费者在运行时 import 这个子路径** ✓——
+生成的 typert 产物只把它当 `typeSymbol` **字符串**用 ✓。改成**纯类型子路径**后，`files` 收到与
+`client-ui-agent-team` 同形 ✓，`constraints` 与 `publint` 同时转绿 ✓。
+
+`verify-node-next-types` 在本机**死于软链权限** ✗（脚本在 tsc 之前就 `EPERM` ✓，且它把非 tsc 异常也吞进
+`catch` ✗，于是诊断是空的 ✓）。我另做**等价验证** ✓：用目录 junction 建 NodeNext 消费者工程，
+导入五个子路径 → **EXIT=0** ✓。
+
+### 验收
+
+- `packages/cluster` + 六个 cluster 包：**196 用例 / 16 文件全绿** ✓（本轮 +10 ✓）
+- `tsc -b tsconfig.host.json` **0** ✓、`tsc -b tsconfig.client.json` **0** ✓
+- 四条 cluster E2E（真 CLI + 真 Team，重建 `lib/` 之后）：**4 passed** ✓
+- `constraints` **0** ✓、`publint` **0** ✓、`doc-standard` **22/22** ✓、`client catalog` **0** ✓，
+  14 项文档 / 生成器门禁全 0 ✓（配对 1017 ✓、链接 2023 ✓、折行 2047 ✓、模型体验 299 ✓、摘要 355 ✓、
+  限制 299 ✓、子系统页 55 ✓）
+- 权威两组余下的失败逐条定性 ✓：`node-next types` 与 `documentation site checks` = **本机不能建符号链接** ✓
+  （`EPERM` ✓）；`Cordis config` = **既有** ✓（`apps/cli/tests/profiles/acp/cordis.yml` ✓，不在 diff 内 ✓）
+
+---
+
 ## 12. 下一步（按优先级）
 
-1. **两条未定性的门禁失败** ✓（§11.49 ✓）：`node-next types` 在完整构建之后**仍然红** ✗，
-   本包族是否牵涉其中**尚未定性** ✗——它针对**已构建产物** ✓，先让它打印自己的诊断 ✓；
-   `constraints` 那条由**进行中**的 `cluster-web/package.json` 引起 ✓
-   （`files` 需为 `lib/types/**/*.js` ✓），**提交前必须转绿** ✓。
+1. **一条门禁必须转绿，两条已定性为环境** ✓（§11.49 ✓）：`constraints` 由**进行中**的
+   `cluster-web/package.json` 引起 ✓（`files` 需为 `lib/types/**/*.js` ✓），**提交前必须转绿** ✓；
+   `node-next types` 与 `documentation site checks` 同一个根因：**本机不能创建符号链接** ✓（§11.49 ✓）。
 2. **M4 的最后一次验收是人的一次点击** ✓：功能面已完整 ✓（§11.46 ✓），宿主组合（`--patch` 双叠加 ✓）、
    客户端构建（`build:lib:client` ✓）、jsdom 组件测试（10 例 ✓）都过了 ✓，
    缺的是**在真实浏览器里打开面板、改一份文档、保存** ✓。
